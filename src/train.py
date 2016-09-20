@@ -18,8 +18,8 @@ import multimlp
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('embeddings', help='Text file with word embeddings')
-    parser.add_argument('train', help='JSONL file with training corpus')
-    parser.add_argument('validation', help='JSONL file with validation corpus')
+    parser.add_argument('train', help='JSONL or TSV file with training corpus')
+    parser.add_argument('validation', help='JSONL or TSV file with validation corpus')
     parser.add_argument('save', help='Directory to save the model files')
     parser.add_argument('logs', help='Log directory to save summaries')
 

@@ -90,7 +90,7 @@ def load_text_embeddings(path, generate_padding=True, generate_go=True):
 
 def read_snli(filename):
     """
-    Read a JSONL file from the SNLI corpus
+    Read a JSONL or TSV file with the SNLI corpus
 
     :param filename: path to the file
     :return: a list of tuples (first_sent, second_sent, label)
@@ -101,24 +101,36 @@ def read_snli(filename):
 
     # the SNLI corpus has one JSON object per line
     with open(filename, 'rb') as f:
-        for line in f:
-            line = unicode(line, 'utf-8')
-            data = json.loads(line)
 
-            if data['gold_label'] == '-':
-                # ignore items without a gold label
-                continue
+        if filename.endswith('.tsv') or filename.endswith('.txt'):
+            f.seek(0)
+            for line in f:
+                line = line.decode('utf-8').strip()
+                sent1, sent2, label = line.split('\t')
+                if label == '-':
+                    continue
+                tokens1 = sent1.split()
+                tokens2 = sent2.split()
+                useful_data.append((tokens1, tokens2, label))
+        else:
+            for line in f:
+                line = unicode(line, 'utf-8')
+                data = json.loads(line)
 
-            sentence1_parse = data['sentence1_parse']
-            sentence2_parse = data['sentence2_parse']
-            label = data['gold_label']
+                if data['gold_label'] == '-':
+                    # ignore items without a gold label
+                    continue
 
-            tree1 = nltk.Tree.fromstring(sentence1_parse.lower())
-            tree2 = nltk.Tree.fromstring(sentence2_parse.lower())
-            tokens1 = tree1.leaves()
-            tokens2 = tree2.leaves()
-            t = (tokens1, tokens2, label)
-            useful_data.append(t)
+                sentence1_parse = data['sentence1_parse']
+                sentence2_parse = data['sentence2_parse']
+                label = data['gold_label']
+
+                tree1 = nltk.Tree.fromstring(sentence1_parse.lower())
+                tree2 = nltk.Tree.fromstring(sentence2_parse.lower())
+                tokens1 = tree1.leaves()
+                tokens2 = tree2.leaves()
+                t = (tokens1, tokens2, label)
+                useful_data.append(t)
 
     return useful_data
 

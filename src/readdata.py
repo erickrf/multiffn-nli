@@ -76,7 +76,8 @@ def load_text_embeddings(path, generate_padding=True, generate_go=True):
 
     if generate_padding:
         words[utils.PADDING] = index
-        vectors.append(np.zeros(vector_size))
+        vectors.append(np.random.uniform(-0.1, 0.1, vector_size))
+        # vectors.append(np.zeros(vector_size))
         index += 1
     if generate_go:
         words[utils.GO] = index

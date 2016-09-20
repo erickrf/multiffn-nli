@@ -119,6 +119,10 @@ class MultiFeedForward(object):
         self.clip_value = clip_value
         self.dropout_keep = tf.placeholder(tf.float32, None, 'dropout')
 
+        # normalize embeddings
+        norms = np.linalg.norm(embeddings, axis=1)
+        embeddings /= norms.reshape((-1, 1))
+
         self.embedding_size = embeddings.shape[1]
         self.embeddings = tf.Variable(embeddings, trainable=False)
 
@@ -162,9 +166,9 @@ class MultiFeedForward(object):
         embeddings_2d = tf.reshape(embeddings, [-1, self.embedding_size])
 
         with tf.variable_scope('projection', reuse=reuse_weights):
-            xavier = tf.contrib.layers.xavier_initializer()
+            initializer = tf.random_normal_initializer(0.0, 0.1)
             weights = tf.get_variable('weights', [self.embedding_size, self.num_units],
-                                      initializer=xavier)
+                                      initializer=initializer)
             if not reuse_weights:
                 variable_summaries(weights, 'projection/weights')
 
@@ -205,16 +209,16 @@ class MultiFeedForward(object):
             inputs2d = inputs
 
         with tf.variable_scope('feedforward', reuse=reuse_weights):
-            xavier = tf.contrib.layers.xavier_initializer()
+            initializer = tf.random_normal_initializer(0.0, 0.1)
 
             with tf.variable_scope('layer1'):
                 shape = [num_input_units, self.num_units]
-                weights1 = tf.get_variable('weights', shape, initializer=xavier)
+                weights1 = tf.get_variable('weights', shape, initializer=initializer)
                 bias1 = tf.Variable(tf.zeros([self.num_units]), name='bias')
 
             with tf.variable_scope('layer2'):
                 shape = [self.num_units, self.num_units]
-                weights2 = tf.get_variable('weights', shape, initializer=xavier)
+                weights2 = tf.get_variable('weights', shape, initializer=initializer)
                 bias2 = tf.Variable(tf.zeros([self.num_units]), name='bias')
 
             # relus are (time_steps * batch, num_units)
@@ -368,11 +372,11 @@ class MultiFeedForward(object):
         concat_v = tf.concat(1, [v1_sum, v2_sum])
 
         with tf.variable_scope('aggregation'):
-            xavier = tf.contrib.layers.xavier_initializer()
+            initializer = tf.random_normal_initializer(0.0, 0.1)
             with tf.variable_scope('linear'):
                 shape = [self.num_units, self.num_classes]
                 weights_linear = tf.get_variable('weights', shape,
-                                                 initializer=xavier)
+                                                 initializer=initializer)
                 bias_linear = tf.get_variable('bias', [self.num_classes],
                                               initializer=tf.zeros_initializer)
 
@@ -397,7 +401,7 @@ class MultiFeedForward(object):
             l2_loss = tf.mul(self.l2_constant, l2_partial_sum, 'l2_loss')
             self.loss = tf.add(labeled_loss, l2_loss, 'loss')
 
-            optimizer = tf.train.AdamOptimizer(self.learning_rate)
+            optimizer = tf.train.AdagradOptimizer(self.learning_rate)
             gradients, v = zip(*optimizer.compute_gradients(self.loss))
             if self.clip_value is not None:
                 gradients, _ = tf.clip_by_global_norm(gradients, self.clip_value)

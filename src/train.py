@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-from __future__ import division
+from __future__ import division, print_function
 
 """
 Script to train an RTE LSTM.
@@ -78,6 +78,17 @@ if __name__ == '__main__':
                                       training=True, learning_rate=args.rate,
                                       clip_value=args.clip_norm, l2_constant=args.l2)
     sess.run(tf.initialize_all_variables())
+
+    total_params = 0
+    for variable in tf.trainable_variables():
+        shape = variable.get_shape()
+        variable_params = 1
+        for dim in shape:
+            variable_params *= dim.value
+        logger.debug('%s: %d params' % (variable.name, variable_params))
+        total_params += variable_params
+
+    logger.debug('Total parameters: %d' % total_params)
 
     logger.info('Starting training')
     model.train(sess, train_data, valid_data, args.num_epochs, args.batch_size,

@@ -16,7 +16,7 @@ from collections import Counter
 tokenizer = nltk.tokenize.TreebankWordTokenizer()
 label_map = {'neutral': 0,
              'entailment': 1,
-             'paraphrase': 2}
+             'contradiction': 2}
 UNKNOWN = '**UNK**'
 PADDING = '**PAD**'
 GO = '**GO**'

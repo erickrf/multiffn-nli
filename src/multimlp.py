@@ -25,22 +25,15 @@ def variable_summaries(var, name):
         tf.histogram_summary(name, var)
 
 
-def attention_softmax3d(values, size):
+def attention_softmax3d(values):
     """
-    Performs a softmax over the attention values. Values after the second
-    sentence end are masked to -inf, so that the resulting softmax is 0.
+    Performs a softmax over the attention values.
 
     :param values: 3d tensor with raw values
-    :param size: the size of the second sentence, over which we are attending
     :return: 3d tensor, same shape as input
     """
-    # we change values after sentence end to -inf so they don't interfere with
-    # softmax. we can't change values after both sentence ends to -inf because
-    # we would compute softmax over a row of -inf and get NAN's that lead into
-    # errors when computing gradients
-    masked_values = mask_values_after_sentence_end(values, size, -np.inf)
-    num_units = tf.shape(masked_values)[2]
     original_shape = tf.shape(values)
+    num_units = original_shape[2]
     reshaped_values = tf.reshape(values, tf.pack([-1, num_units]))
     softmaxes = tf.nn.softmax(reshaped_values)
     return tf.reshape(softmaxes, original_shape)
@@ -160,6 +153,7 @@ class MultiFeedForward(object):
         Project word embeddings into another dimensionality
 
         :param embeddings: embedded sentence, shape (time_steps, batch, embedding_size)
+        :param reuse_weights: reuse weights in internal layers
         :return: projected embeddings with shape (batch, time_steps, num_units)
         """
         time_steps = tf.shape(embeddings)[0]
@@ -279,7 +273,7 @@ class MultiFeedForward(object):
 
             # bias is broadcast along batches
             raw_attentions += bias
-            attentions = attention_softmax3d(raw_attentions, sentence_size)
+            attentions = attention_softmax3d(raw_attentions)
 
             attended = tf.batch_matmul(attentions, sentence)
 
@@ -313,10 +307,10 @@ class MultiFeedForward(object):
             raw_attentions = tf.batch_matmul(repr1, repr2)
 
             # now get the attention softmaxes
-            att_sent1 = attention_softmax3d(raw_attentions, self.sentence2_size)
+            att_sent1 = attention_softmax3d(raw_attentions)
 
             att_transposed = tf.transpose(raw_attentions, [0, 2, 1])
-            att_sent2 = attention_softmax3d(att_transposed, self.sentence1_size)
+            att_sent2 = attention_softmax3d(att_transposed)
 
             self.inter_att1 = att_sent1
             self.inter_att2 = att_sent2
@@ -333,6 +327,7 @@ class MultiFeedForward(object):
         :param sentence: embedded and projected sentence,
             shape (batch, time_steps, num_units)
         :param soft_alignment: tensor with shape (batch, time_steps, num_units)
+        :param reuse_weights: whether to reuse weights in the internal layers
         :return: a tensor (batch, time_steps, num_units)
         """
         with tf.variable_scope('comparison', reuse=reuse_weights):
@@ -358,14 +353,6 @@ class MultiFeedForward(object):
         :param v2: tensor with shape (batch, time_steps, num_units)
         :return: logits over classes, shape (batch, num_classes)
         """
-        # zero the positions after sentence end
-        v1_t = mask_values_after_sentence_end(tf.transpose(v1, [0, 2, 1]),
-                                              self.sentence1_size, 0)
-        v2_t = mask_values_after_sentence_end(tf.transpose(v2, [0, 2, 1]),
-                                              self.sentence2_size, 0)
-        v1 = tf.transpose(v1_t, [0, 2, 1])
-        v2 = tf.transpose(v2_t, [0, 2, 1])
-
         # sum over time steps; resulting shape is (batch, num_units)
         v1_sum = tf.reduce_sum(v1, [1])
         v2_sum = tf.reduce_sum(v2, [1])

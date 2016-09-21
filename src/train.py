@@ -30,7 +30,7 @@ if __name__ == '__main__':
                         type=int)
     parser.add_argument('-u', dest='num_units', help='Number of hidden units',
                         default=100, type=int)
-    parser.add_argument('-d', dest='dropout', help='Dropout probability', default=1.0,
+    parser.add_argument('-d', dest='dropout', help='Dropout keep probability', default=1.0,
                         type=float)
     parser.add_argument('-c', dest='clip_norm', help='Norm to clip training gradients',
                         default=None, type=float)

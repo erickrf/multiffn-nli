@@ -113,11 +113,10 @@ class MultiFeedForward(object):
         self.dropout_keep = tf.placeholder(tf.float32, None, 'dropout')
 
         # normalize embeddings
-        norms = np.linalg.norm(embeddings, axis=1)
-        embeddings /= norms.reshape((-1, 1))
+        norms = np.linalg.norm(embeddings, axis=1).reshape((-1, 1))
 
         self.embedding_size = embeddings.shape[1]
-        self.embeddings = tf.Variable(embeddings, trainable=False)
+        self.embeddings = tf.Variable(embeddings / norms, trainable=False)
 
         # clip the sentences to the length of the longest one in the batch
         # this saves processing time
@@ -384,9 +383,12 @@ class MultiFeedForward(object):
                                                                            self.label)
             labeled_loss = tf.reduce_mean(cross_entropy)
             weights = [v for v in tf.all_variables() if 'weight' in v.name]
-            l2_partial_sum = sum([tf.nn.l2_loss(weight) for weight in weights])
-            l2_loss = tf.mul(self.l2_constant, l2_partial_sum, 'l2_loss')
-            self.loss = tf.add(labeled_loss, l2_loss, 'loss')
+            if self.l2_constant > 0:
+                l2_partial_sum = sum([tf.nn.l2_loss(weight) for weight in weights])
+                l2_loss = tf.mul(self.l2_constant, l2_partial_sum, 'l2_loss')
+                self.loss = tf.add(labeled_loss, l2_loss, 'loss')
+            else:
+                self.loss = labeled_loss
 
             optimizer = tf.train.AdagradOptimizer(self.learning_rate)
             gradients, v = zip(*optimizer.compute_gradients(self.loss))

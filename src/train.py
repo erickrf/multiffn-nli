@@ -40,9 +40,11 @@ if __name__ == '__main__':
     parser.add_argument('--l2', help='L2 normalization constant', type=float, default=0.0)
     parser.add_argument('--report', help='Number of batches between performance reports',
                         default=100, type=int)
+    parser.add_argument('-v', help='Verbose', action='store_true', dest='verbose')
 
     args = parser.parse_args()
 
+    utils.config_logger(args.verbose)
     logger = utils.get_logger('train')
     logger.info('Reading training data')
     train_pairs = readdata.read_snli(args.train)

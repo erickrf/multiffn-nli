@@ -99,12 +99,22 @@ def count_corpus_tokens(pairs):
     return c
 
 
-def get_logger(name='rte_lstm'):
+def config_logger(verbose):
+    """
+    Setup basic logger configuration
+
+    :param verbose: boolean
+    :return:
+    """
+    level = logging.DEBUG if verbose else logging.INFO
+    logging.basicConfig(format='%(message)s', level=level)
+
+
+def get_logger(name):
     """
     Setup and return a simple logger.
     :return:
     """
-    logging.basicConfig(format='%(message)s', level=logging.DEBUG)
     logger = logging.getLogger(name)
     handler = logging.StreamHandler()
     logger.addHandler(handler)

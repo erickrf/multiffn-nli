@@ -259,3 +259,14 @@ def get_max_sentence_sizes(pairs1, pairs2):
     max_size2 = max(train_max2, valid_max2)
 
     return max_size1, max_size2
+
+
+def normalize_embeddings(embeddings):
+    """
+    Normalize the embeddings to have norm 1.
+    :param embeddings: 2-d numpy array
+    :return: normalized embeddings
+    """
+    # normalize embeddings
+    norms = np.linalg.norm(embeddings, axis=1).reshape((-1, 1))
+    return embeddings / norms

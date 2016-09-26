@@ -17,24 +17,26 @@ import multimlp
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('embeddings', help='Text file with word embeddings')
+    parser.add_argument('embeddings', help='Text or numpy file with word embeddings')
     parser.add_argument('train', help='JSONL or TSV file with training corpus')
     parser.add_argument('validation', help='JSONL or TSV file with validation corpus')
     parser.add_argument('save', help='Directory to save the model files')
     parser.add_argument('logs', help='Log directory to save summaries')
 
-    # choose the model to be used
+    parser.add_argument('--vocab', help='Vocabulary file (only needed if numpy'
+                                        'embedding file is given)')
     parser.add_argument('-e', dest='num_epochs', default=10, type=int,
                         help='Number of epochs')
     parser.add_argument('-b', dest='batch_size', default=32, help='Batch size',
                         type=int)
     parser.add_argument('-u', dest='num_units', help='Number of hidden units',
                         default=100, type=int)
-    parser.add_argument('-d', dest='dropout', help='Dropout keep probability', default=1.0,
-                        type=float)
+    parser.add_argument('-d', dest='dropout', help='Dropout keep probability',
+                        default=1.0, type=float)
     parser.add_argument('-c', dest='clip_norm', help='Norm to clip training gradients',
                         default=None, type=float)
-    parser.add_argument('-r', help='Learning rate', type=float, default=0.001, dest='rate')
+    parser.add_argument('-r', help='Learning rate', type=float, default=0.001,
+                        dest='rate')
     parser.add_argument('--use-intra', help='Use intra-sentence attention',
                         action='store_true', dest='use_intra')
     parser.add_argument('--l2', help='L2 normalization constant', type=float, default=0.0)
@@ -51,7 +53,8 @@ if __name__ == '__main__':
     logger.info('Reading validation data')
     valid_pairs = readdata.read_snli(args.validation)
     logger.info('Reading word embeddings')
-    word_dict, embeddings = readdata.load_text_embeddings(args.embeddings)
+    word_dict, embeddings = readdata.load_embeddings(args.embeddings, args.vocab)
+    embeddings = utils.normalize_embeddings(embeddings)
     logger.info('Writing word dictionary')
     readdata.write_word_dict(word_dict, args.save)
     logger.debug('Embeddings have shape {}'.format(embeddings.shape))
@@ -75,11 +78,13 @@ if __name__ == '__main__':
 
     sess = tf.InteractiveSession()
     logger.info('Creating model')
+    embedding_size = embeddings.shape[1]
     model = multimlp.MultiFeedForward(args.num_units, max_size1, max_size2, 3,
-                                      embeddings, use_intra_attention=args.use_intra,
+                                      embedding_size,
+                                      use_intra_attention=args.use_intra,
                                       training=True, learning_rate=args.rate,
                                       clip_value=args.clip_norm, l2_constant=args.l2)
-    sess.run(tf.initialize_all_variables())
+    model.initialize(sess, embeddings)
 
     total_params = 0
     for variable in tf.trainable_variables():
@@ -93,5 +98,5 @@ if __name__ == '__main__':
     logger.debug('Total parameters: %d' % total_params)
 
     logger.info('Starting training')
-    model.train(sess, train_data, valid_data, args.num_epochs, args.batch_size,
-                args.dropout, args.save, args.logs, args.report)
+    model.train(sess, train_data, valid_data, embeddings, args.num_epochs,
+                args.batch_size, args.dropout, args.save, args.logs, args.report)

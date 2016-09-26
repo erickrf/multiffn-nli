@@ -40,6 +40,74 @@ def read_word_dict(dirname):
     return defaultdict(int, zip(words, index_range))
 
 
+def _generate_random_vector(size):
+    """
+    Generate a random vector from a uniform distribution between
+    -0.1 and 0.1.
+    """
+    return np.random.uniform(-0.1, 0.1, size)
+
+
+def load_embeddings(embeddings_path, vocabulary_path=None,
+                    generate_padding=True, generate_go=True):
+    """
+    Load and return an embedding model in either text format or
+    numpy binary format. The text format is used if vocabulary_path
+    is None (because the vocabulary is in the same file as the
+    embeddings).
+
+    :return: a tuple (defaultdict, array)
+    """
+    if vocabulary_path is None:
+        return load_text_embeddings(embeddings_path, generate_padding,
+                                    generate_go)
+    return load_binary_embeddings(embeddings_path, vocabulary_path,
+                                  generate_padding, generate_go)
+
+
+def load_binary_embeddings(embeddings_path, vocabulary_path,
+                           generate_padding=True, generate_go=True):
+    """
+    Load any embedding model in numpy format, and a corresponding
+    vocabulary with one word per line.
+
+    :param embeddings_path: path to embeddings file
+    :param vocabulary_path: path to text file with words
+    :param generate_padding: generate a zero-based padding vector
+    :param generate_go: generate a random vector for the GO symbol
+    :return: a tuple (defaultdict, array) The dict maps words to indices.
+        Unknown words are mapped to 0.
+    """
+    words = defaultdict(int)
+
+    vectors = np.load(embeddings_path)
+    vector_size = vectors.shape[1]
+
+    with open(vocabulary_path, 'rb') as f:
+        text = f.read().decode('utf-8')
+    words = text.splitlines()
+
+    # create a mapping starting from 1 and leave 0 as the rare word
+    mapping = zip(words, range(1, len(words)))
+    wd = defaultdict(int, mapping)
+    index = len(wd)
+
+    random_vector = _generate_random_vector(vector_size)
+    stack = [random_vector, vectors]
+
+    if generate_padding:
+        stack.append(_generate_random_vector(vector_size))
+        wd[utils.PADDING] = index
+        index += 1
+
+    if generate_go:
+        stack.append(_generate_random_vector(vector_size))
+        wd[utils.GO] = index
+
+    embeddings = np.vstack(stack)
+    return wd, embeddings
+
+
 def load_text_embeddings(path, generate_padding=True, generate_go=True):
     """
     Load any embedding model written as text, in the format:
@@ -63,7 +131,7 @@ def load_text_embeddings(path, generate_padding=True, generate_go=True):
             if line == '':
                 continue
 
-            fields = line.split()
+            fields = line.split(' ')
             word = fields[0]
             words[word] = index
             index += 1
@@ -71,17 +139,17 @@ def load_text_embeddings(path, generate_padding=True, generate_go=True):
             vectors.append(vector)
 
     vector_size = len(vectors[0])
-    vectors.insert(0, np.random.uniform(-0.1, 0.1, vector_size))
+    vectors.insert(0, _generate_random_vector(vector_size))
     index = len(vectors)
 
     if generate_padding:
         words[utils.PADDING] = index
-        vectors.append(np.random.uniform(-0.1, 0.1, vector_size))
+        vectors.append(_generate_random_vector(vector_size))
         # vectors.append(np.zeros(vector_size))
         index += 1
     if generate_go:
         words[utils.GO] = index
-        vectors.append(np.random.uniform(-0.1, 0.1, vector_size))
+        vectors.append(_generate_random_vector(vector_size))
         index += 1
 
     embeddings = np.array(vectors, dtype=np.float32)

@@ -92,7 +92,7 @@ class MultiFeedForward(object):
     It applies feedforward MLPs to combinations of parts of the two sentences,
     without any recurrent structure.
     """
-    def __init__(self, num_units, max_size1, max_size2, num_classes, embeddings,
+    def __init__(self, num_units, max_size1, max_size2, num_classes, embedding_size,
                  use_intra_attention=False, training=True, learning_rate=0.001,
                  clip_value=None, l2_constant=0.0, distance_biases=10):
 
@@ -102,6 +102,7 @@ class MultiFeedForward(object):
         self.num_classes = num_classes
         self.use_intra = use_intra_attention
         self.distance_biases = distance_biases
+        self.embeddings_ph = tf.placeholder(tf.float32, (None, embedding_size), 'embeddings')
         self.sentence1 = tf.placeholder(tf.int32, (max_size1, None), 'sentence1')
         self.sentence2 = tf.placeholder(tf.int32, (max_size2, None), 'sentence2')
         self.sentence1_size = tf.placeholder(tf.int32, [None], 'sent1_size')
@@ -111,12 +112,12 @@ class MultiFeedForward(object):
         self.learning_rate = learning_rate
         self.clip_value = clip_value
         self.dropout_keep = tf.placeholder(tf.float32, None, 'dropout')
+        self.embedding_size = embedding_size
 
-        # normalize embeddings
-        norms = np.linalg.norm(embeddings, axis=1).reshape((-1, 1))
-
-        self.embedding_size = embeddings.shape[1]
-        self.embeddings = tf.Variable(embeddings / norms, trainable=False)
+        # we initialize the embeddings from a placeholder to circumvent
+        # tensorflow's limitation of 2 GB nodes in the graph
+        self.embeddings = tf.Variable(self.embeddings_ph, trainable=False,
+                                      validate_shape=False)
 
         # clip the sentences to the length of the longest one in the batch
         # this saves processing time
@@ -131,8 +132,8 @@ class MultiFeedForward(object):
 
         # alpha and beta have shape (batch, time_steps, embeddings)
         if use_intra_attention:
-            repr1 = self.compute_intra_attention(projected1, self.sentence1_size)
-            repr2 = self.compute_intra_attention(projected2, self.sentence2_size, True)
+            repr1 = self.compute_intra_attention(projected1)
+            repr2 = self.compute_intra_attention(projected2, True)
         else:
             repr1 = projected1
             repr2 = projected2
@@ -245,13 +246,12 @@ class MultiFeedForward(object):
 
         return values
 
-    def compute_intra_attention(self, sentence, sentence_size, reuse_weights=False):
+    def compute_intra_attention(self, sentence, reuse_weights=False):
         """
         Compute the intra attention of a sentence. It returns a concatenation
         of the original sentence with its attended output.
 
         :param sentence: tensor in shape (batch, time_steps, num_units)
-        :param sentence_size: tensor in shape (batch)
         :return: a tensor in shape (batch, time_steps, 2*num_units)
         """
         time_steps = tf.shape(sentence)[1]
@@ -396,6 +396,15 @@ class MultiFeedForward(object):
                 gradients, _ = tf.clip_by_global_norm(gradients, self.clip_value)
             self.train_op = optimizer.apply_gradients(zip(gradients, v))
 
+    def initialize(self, session, embeddings):
+        """
+        Initialize all tensorflow variables.
+        :param session: tensorflow session
+        :param embeddings: the contents of the word embeddings
+        """
+        init_op = tf.initialize_all_variables()
+        session.run(init_op, {self.embeddings_ph: embeddings})
+
     @classmethod
     def load(cls, dirname, session):
         """
@@ -446,10 +455,12 @@ class MultiFeedForward(object):
 
         saver.save(session, tensorflow_file)
 
-    def train(self, session, train_dataset, valid_dataset, num_epochs, batch_size,
-              dropout_keep, save_dir, log_dir, report_interval=100):
+    def train(self, session, train_dataset, valid_dataset, embeddings,
+              num_epochs, batch_size, dropout_keep, save_dir, log_dir,
+              report_interval=100):
         """
         Train the model with the specified parameters
+        :param session: tensorflow session
         :param train_dataset: an RTEDataset object with training data
         :param valid_dataset: an RTEDataset object with validation data
         :param num_epochs: number of epochs to run the model. During each epoch,
@@ -471,7 +482,12 @@ class MultiFeedForward(object):
         # batch counter doesn't reset after each epoch
         batch_counter = 0
 
-        saver = tf.train.Saver(max_to_keep=1)
+        # get all weights and biases, but not the embeddings
+        # (embeddings are huge and saved separately)
+        vars_to_save = [var for var in tf.all_variables()
+                        if 'weight' in var.name or 'bias' in var.name]
+
+        saver = tf.train.Saver(vars_to_save, max_to_keep=1)
         summ_writer = tf.train.SummaryWriter(log_dir, session.graph)
         summ_writer.add_graph(session.graph)
 

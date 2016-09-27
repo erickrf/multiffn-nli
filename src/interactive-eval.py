@@ -43,15 +43,22 @@ def print_attention(tokens, attentions):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('load', help='Directory with saved model files')
+    parser.add_argument('embeddings', help='Text or numpy file with word embeddings')
+    parser.add_argument('--vocab', help='Vocabulary file (only needed if numpy'
+                                        'embedding file is given)')
     args = parser.parse_args()
 
+    utils.config_logger(verbose=False)
     logger = utils.get_logger()
 
     logger.info('Reading model')
     sess = tf.InteractiveSession()
     model = multimlp.MultiFeedForward.load(args.load, sess)
-    word_dict = readdata.read_word_dict(args.load)
-
+    word_dict, embeddings = readdata.load_embeddings(args.embeddings, args.vocab,
+                                                     generate=False,
+                                                     load_extra_from=args.load)
+    embeddings = utils.normalize_embeddings(embeddings)
+    model.initialize_embeddings(sess, embeddings)
     number_to_label = {v: k for (k, v) in utils.label_map.items()}
 
     while True:

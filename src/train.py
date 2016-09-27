@@ -54,10 +54,10 @@ if __name__ == '__main__':
     valid_pairs = readdata.read_snli(args.validation)
     logger.info('Reading word embeddings')
     word_dict, embeddings = readdata.load_embeddings(args.embeddings, args.vocab)
+    readdata.write_extra_embeddings(embeddings, args.save)
     embeddings = utils.normalize_embeddings(embeddings)
-    logger.info('Writing word dictionary')
-    readdata.write_word_dict(word_dict, args.save)
-    logger.debug('Embeddings have shape {}'.format(embeddings.shape))
+    logger.debug('Embeddings have shape {} (including unknown, padding and null)'
+                 .format(embeddings.shape))
 
     logger.info('Converting words to indices')
     max_size1, max_size2 = utils.get_max_sentence_sizes(train_pairs, valid_pairs)
@@ -98,5 +98,5 @@ if __name__ == '__main__':
     logger.debug('Total parameters: %d' % total_params)
 
     logger.info('Starting training')
-    model.train(sess, train_data, valid_data, embeddings, args.num_epochs,
-                args.batch_size, args.dropout, args.save, args.logs, args.report)
+    model.train(sess, train_data, valid_data, args.num_epochs, args.batch_size,
+                args.dropout, args.save, args.logs, args.report)

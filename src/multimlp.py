@@ -83,6 +83,15 @@ def mask_values_after_sentence_end(values, sentence_sizes, value):
     return tf.select(cond, values, mask)
 
 
+def get_weights_and_biases():
+    """
+    Return all weight and bias variables
+    :return:
+    """
+    return [var for var in tf.all_variables()
+            if 'weight' in var.name or 'bias' in var.name]
+
+
 class MultiFeedForward(object):
     """
     Implementation of the multi feed forward network model described in
@@ -396,6 +405,16 @@ class MultiFeedForward(object):
                 gradients, _ = tf.clip_by_global_norm(gradients, self.clip_value)
             self.train_op = optimizer.apply_gradients(zip(gradients, v))
 
+    def initialize_embeddings(self, session, embeddings):
+        """
+        Initialize word embeddings
+        :param session: tensorflow session
+        :param embeddings: the contents of the word embeddings
+        :return:
+        """
+        init_op = tf.initialize_variables([self.embeddings])
+        session.run(init_op, {self.embeddings_ph: embeddings})
+
     def initialize(self, session, embeddings):
         """
         Initialize all tensorflow variables.
@@ -415,30 +434,24 @@ class MultiFeedForward(object):
         """
         params = utils.load_parameters(dirname)
 
-        # create a tensor of zeros just to fill the graph where embeddings are expected
-        # when tf.saver.load() is called, they will be replaced with the actual values
-        embedding_placeholder = np.zeros(params['embedding_shape'], dtype=np.float32)
         model = cls(params['num_units'], params['time_steps1'], params['time_steps2'],
-                    params['num_classes'], embedding_placeholder, training=False)
+                    params['num_classes'], params['embedding_size'], training=False)
 
         tensorflow_file = os.path.join(dirname, 'model')
-        saver = tf.train.Saver()
+        saver = tf.train.Saver(get_weights_and_biases())
         saver.restore(session, tensorflow_file)
 
         return model
 
-    def _get_params_to_save(self, session):
+    def _get_params_to_save(self):
         """
         Return a dictionary with data for reconstructing a persisted object
         """
-        embedding_shape_tf = tf.shape(self.embeddings)
-        embedding_shape = session.run(embedding_shape_tf).tolist()
-
         data = {'time_steps1': self.max_time_steps1,
                 'time_steps2': self.max_time_steps2,
                 'num_units': self.num_units,
                 'num_classes': self.num_classes,
-                'embedding_shape': embedding_shape}
+                'embedding_size': self.embedding_size}
 
         return data
 
@@ -446,7 +459,7 @@ class MultiFeedForward(object):
         """
         Persist a model's information
         """
-        params = self._get_params_to_save(session)
+        params = self._get_params_to_save()
         tensorflow_file = os.path.join(dirname, 'model')
         params_file = os.path.join(dirname, 'model-params.json')
 
@@ -455,7 +468,7 @@ class MultiFeedForward(object):
 
         saver.save(session, tensorflow_file)
 
-    def train(self, session, train_dataset, valid_dataset, embeddings,
+    def train(self, session, train_dataset, valid_dataset,
               num_epochs, batch_size, dropout_keep, save_dir, log_dir,
               report_interval=100):
         """
@@ -484,8 +497,7 @@ class MultiFeedForward(object):
 
         # get all weights and biases, but not the embeddings
         # (embeddings are huge and saved separately)
-        vars_to_save = [var for var in tf.all_variables()
-                        if 'weight' in var.name or 'bias' in var.name]
+        vars_to_save = get_weights_and_biases()
 
         saver = tf.train.Saver(vars_to_save, max_to_keep=1)
         summ_writer = tf.train.SummaryWriter(log_dir, session.graph)

@@ -110,7 +110,7 @@ def config_logger(verbose):
     logging.basicConfig(format='%(message)s', level=level)
 
 
-def get_logger(name):
+def get_logger(name='logger'):
     """
     Setup and return a simple logger.
     :return:
@@ -188,6 +188,12 @@ def _convert_pairs_to_indices(sentences, word_dict, max_len=None,
     The maximum length of the arrays will be 1 more than the actual
     maximum of tokens when using the NULL symbol.
 
+    :param sentences: list of lists of tokens
+    :param word_dict: mapping of tokens to indices in the embeddings
+    :param max_len: maximum allowed sentence length. If None, the
+        longest sentence will be the maximum
+    :param use_null: prepend a null symbol at the beginning of each
+        sentence
     :return: a tuple with a 2-d numpy array for the sentences and
         a 1-d array with their sizes
     """
@@ -211,7 +217,7 @@ def _convert_pairs_to_indices(sentences, word_dict, max_len=None,
 
         array[i, :len(indices)] = indices
 
-    return (array, sizes)
+    return array, sizes
 
 
 def load_parameters(dirname):

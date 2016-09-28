@@ -50,7 +50,7 @@ The train and validation data should be in the JSONL format used in the SNLI cor
 
     1) A text file where each line has a word and its vector with values separated by whitespace or tabs
     
-    2) **(faster!)** A numpy file with the saved embedding matrix and an extra text file with the vocabulary, such that its $i$-th line corresponds to the $i$-th row in the matrix.
+    2) **(faster!)** A numpy file with the saved embedding matrix and an extra text file with the vocabulary, such that its *i*-th line corresponds to the *i*-th row in the matrix.
 
 After training a model, it is possible to analyze its logs using `tensorboard`. 
 

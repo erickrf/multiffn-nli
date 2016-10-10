@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 
 """
-Functions for reading data in a format suitable for the networks.
+Functions for reading and writing data to and from files.
 """
 
 import json
@@ -160,11 +160,52 @@ def load_text_embeddings(path):
     return words, embeddings
 
 
-def read_snli(filename):
+def write_params(dirname, lowercase, language):
+    """
+    Write system parameters (not related to the networks) to a file.
+    """
+    path = os.path.join(dirname, 'system-params.json')
+    data = {'lowercase': lowercase, 'language': language}
+    with open(path, 'wb') as f:
+        json.dump(data, f)
+
+
+def write_label_dict(label_dict, dirname):
+    """
+    Save the label dictionary to the save directory.
+    """
+    path = os.path.join(dirname,'label-map.json')
+    with open(path, 'wb') as f:
+        json.dump(label_dict, f)
+
+
+def load_label_dict(dirname):
+    """
+    Load the label dict saved with a model
+    """
+    path = os.path.join(dirname,'label-map.json')
+    with open(path, 'r') as f:
+        return json.load(f)
+
+
+def load_params(dirname):
+    """
+    Load system parameters (not related to the networks)
+    :return: a dictionary
+    """
+    path = os.path.join(dirname, 'system-params.json')
+    with open(path, 'rb') as f:
+        return json.load(f)
+
+
+def read_corpus(filename, lowercase, language='en'):
     """
     Read a JSONL or TSV file with the SNLI corpus
 
     :param filename: path to the file
+    :param lowercase: whether to convert content to lower case
+    :param language: language to use tokenizer (only used if input is in
+        TSV format)
     :return: a list of tuples (first_sent, second_sent, label)
     """
     # we are only interested in the actual sentences + gold label
@@ -175,20 +216,24 @@ def read_snli(filename):
     with open(filename, 'rb') as f:
 
         if filename.endswith('.tsv') or filename.endswith('.txt'):
-            f.seek(0)
+
+            tokenize = utils.get_tokenizer(language)
             for line in f:
                 line = line.decode('utf-8').strip()
+                if lowercase:
+                    line = line.lower()
                 sent1, sent2, label = line.split('\t')
                 if label == '-':
                     continue
-                tokens1 = sent1.split()
-                tokens2 = sent2.split()
+                tokens1 = tokenize(sent1)
+                tokens2 = tokenize(sent2)
                 useful_data.append((tokens1, tokens2, label))
         else:
             for line in f:
-                line = unicode(line, 'utf-8')
+                line = line.decode('utf-8')
+                if lowercase:
+                    line = line.lower()
                 data = json.loads(line)
-
                 if data['gold_label'] == '-':
                     # ignore items without a gold label
                     continue
@@ -197,8 +242,8 @@ def read_snli(filename):
                 sentence2_parse = data['sentence2_parse']
                 label = data['gold_label']
 
-                tree1 = nltk.Tree.fromstring(sentence1_parse.lower())
-                tree2 = nltk.Tree.fromstring(sentence2_parse.lower())
+                tree1 = nltk.Tree.fromstring(sentence1_parse)
+                tree2 = nltk.Tree.fromstring(sentence2_parse)
                 tokens1 = tree1.leaves()
                 tokens2 = tree2.leaves()
                 t = (tokens1, tokens2, label)

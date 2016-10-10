@@ -3,7 +3,7 @@
 from __future__ import print_function
 
 """
-Interactive evaluation for the RTE LSTM.
+Interactive evaluation for the RTE networks.
 """
 
 import argparse
@@ -12,32 +12,68 @@ import numpy as np
 
 import multimlp
 import utils
-import readdata
+import ioutils
 
 
-def convert_tokens(sentence, word_dict, num_time_steps, prepend=None):
+class SentenceWrapper(object):
     """
-    Convert a sequence of tokens into the input array used by the network
-    :param prepend: if not None, prepend this value to the sequence
+    Class for the basic sentence preprocessing needed to make it readable
+    by the networks.
     """
-    values = [word_dict[token] for token in sentence]
-    if prepend is not None:
-        values = [prepend] + values
+    def __init__(self, sentence, word_dict, lowercase, language='en'):
+        self.sentence = sentence
+        tokenize = utils.get_tokenizer(language)
+        if lowercase:
+            pre_tokenize = sentence.lower()
+        else:
+            pre_tokenize = sentence
+        self.tokens = tokenize(pre_tokenize)
+        self.indices = [word_dict[token] for token in self.tokens_with_null]
+        self.padding_index = word_dict[utils.PADDING]
 
-    indices = np.array(values)
-    padded = np.pad(indices, (0, num_time_steps - len(indices)),
-                    'constant', constant_values=word_dict[utils.PADDING])
-    return padded.reshape((num_time_steps, 1))
+    def __len__(self):
+        return len(self.tokens)
+
+    @property
+    def tokens_with_null(self):
+        return [utils.GO] + self.tokens
+
+    def convert_sentence(self, num_time_steps):
+        """
+        Convert a sequence of tokens into the input array used by the network
+        :return: the vector to be given to the network
+        """
+        indices = np.array(self.indices)
+        padded = np.pad(indices, (0, num_time_steps - len(indices)),
+                        'constant', constant_values=self.padding_index)
+        return padded.reshape((num_time_steps, 1))
 
 
-def print_attention(tokens, attentions):
-    attentions *= 10
-    max_len = max([len(t) for t in tokens])
-    fmt_str = '{{:{}}} {{}}'.format(max_len)
+def print_attention(tokens1, tokens2, attention):
+    # multiply by 10 to make it easier to visualize
+    attention_bigger = attention * 10
+    max_length_sent1 = max([len(t) for t in tokens1])
 
-    for token, att in zip(tokens, attentions):
-        values = ["{:0.2f}".format(x) for x in att]
-        print (fmt_str.format(token, values))
+    # create formatting string to match the size of the tokens
+    att_formatters = ['{:>%d.2}' % len(t) for t in tokens2]
+
+    # first line has whitespace in the first sentence column and
+    # then the second one
+    blank = ' ' * max_length_sent1
+
+    # take at least length 4 to fit the 9.99 format
+    formatted_sent2 = ['{:>4}'.format(token) for token in tokens2]
+    first_line = blank + '\t' + '\t'.join(formatted_sent2)
+    print(first_line)
+
+    for token, att in zip(tokens1, attention_bigger):
+
+        values = [fmt.format(x)
+                  for x, fmt in zip(att, att_formatters)]
+        fmt_str = '{:>%d}' % max_length_sent1
+        formatted_token = fmt_str.format(token)
+        line = formatted_token + '\t' + '\t'.join(values)
+        print (line)
 
 
 if __name__ == '__main__':
@@ -50,30 +86,37 @@ if __name__ == '__main__':
 
     utils.config_logger(verbose=False)
     logger = utils.get_logger()
+    params = ioutils.load_params(args.load)
+    label_dict = ioutils.load_label_dict(args.load)
+    number_to_label = {v: k for (k, v) in label_dict.items()}
 
     logger.info('Reading model')
     sess = tf.InteractiveSession()
     model = multimlp.MultiFeedForward.load(args.load, sess)
-    word_dict, embeddings = readdata.load_embeddings(args.embeddings, args.vocab,
-                                                     generate=False,
-                                                     load_extra_from=args.load)
+    word_dict, embeddings = ioutils.load_embeddings(args.embeddings, args.vocab,
+                                                    generate=False,
+                                                    load_extra_from=args.load)
     embeddings = utils.normalize_embeddings(embeddings)
     model.initialize_embeddings(sess, embeddings)
-    number_to_label = {v: k for (k, v) in utils.label_map.items()}
 
     while True:
-        sent1 = raw_input('Type sentence 1: ')
-        sent2 = raw_input('Type sentence 2: ')
-        tokens1 = utils.tokenize(sent1)
-        tokens2 = utils.tokenize(sent2)
-        vector1 = convert_tokens(tokens1, word_dict, model.max_time_steps1)
-        vector2 = convert_tokens(tokens2, word_dict, model.max_time_steps2,
-                                 prepend=word_dict[utils.GO])
+        sent1 = raw_input('Type sentence 1: ').decode('utf-8')
+        sent2 = raw_input('Type sentence 2: ').decode('utf-8')
+        sent1 = SentenceWrapper(sent1, word_dict,
+                                params['lowercase'], params['language'])
+        sent2 = SentenceWrapper(sent2, word_dict,
+                                params['lowercase'], params['language'])
+
+        vector1 = sent1.convert_sentence(model.max_time_steps1)
+        vector2 = sent2.convert_sentence(model.max_time_steps2)
+        # +1 for NULL symbol
+        size1 = len(sent1) + 1
+        size2 = len(sent2) + 1
 
         feeds = {model.sentence1: vector1,
                  model.sentence2: vector2,
-                 model.sentence1_size: [len(tokens1)],
-                 model.sentence2_size: [len(tokens2)+1],
+                 model.sentence1_size: [size1],
+                 model.sentence2_size: [size2],
                  model.dropout_keep: 1.0}
 
         answer = sess.run(model.answer, feed_dict=feeds)

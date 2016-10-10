@@ -12,11 +12,9 @@ import os
 import json
 import numpy as np
 from collections import Counter
+from nltk.tokenize.regexp import RegexpTokenizer
 
 tokenizer = nltk.tokenize.TreebankWordTokenizer()
-label_map = {'neutral': 0,
-             'entailment': 1,
-             'contradiction': 2}
 UNKNOWN = '**UNK**'
 PADDING = '**PAD**'
 GO = '**GO**'
@@ -54,15 +52,53 @@ class RTEDataset(object):
                         self.sizes1, self.sizes2, self.labels])
 
 
-def tokenize(text, lowercase=True):
+def get_tokenizer(language):
+    """
+    Return the tokenizer function according to the language.
+    """
+    language = language.lower()
+    if language == 'en':
+        tokenize = tokenize_english
+    elif language == 'pt':
+        tokenize = tokenize_portuguese
+    else:
+        ValueError('Unsupported language: %s' % language)
+
+    return tokenize
+
+
+def tokenize_english(text):
     """
     Tokenize a piece of text using the Treebank tokenizer
 
-    :param lowercase: also convert the text to lowercase
     :return: a list of strings
     """
-    if lowercase:
-        text = text.lower()
+    return tokenizer.tokenize(text)
+
+
+def tokenize_portuguese(text):
+    """
+    Tokenize the given sentence in Portuguese. The tokenization is done in conformity
+    with Universal Treebanks (at least it attempts so).
+
+    :param text: text to be tokenized, as a string
+    """
+    tokenizer_regexp = ur'''(?ux)
+    # the order of the patterns is important!!
+    # more structured patterns come first
+    [a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+|    # emails
+    (?:[\#@]\w+)|                     # Hashtags and twitter user names
+    (?:[^\W\d_]\.)+|                  # one letter abbreviations, e.g. E.U.A.
+    (?:[DSds][Rr][Aa]?)\.|            # common abbreviations such as dr., sr., sra., dra.
+    \b\d+(?:[-:.,]\w+)*(?:[.,]\d+)?\b|
+        # numbers in format 999.999.999,999, or hyphens to alphanumerics
+    \.{3,}|                           # ellipsis or sequences of dots
+    (?:\w+(?:\.\w+|-\d+)*)|           # words with dots and numbers, possibly followed by hyphen number
+    -+|                               # any sequence of dashes
+    \S                                # any non-space character
+    '''
+    tokenizer = RegexpTokenizer(tokenizer_regexp)
+
     return tokenizer.tokenize(text)
 
 
@@ -76,8 +112,8 @@ def tokenize_corpus(pairs):
     """
     tokenized_pairs = []
     for sent1, sent2, label in pairs:
-        tokens1 = tokenize(sent1)
-        tokens2 = tokenize(sent2)
+        tokens1 = tokenize_english(sent1)
+        tokens2 = tokenize_english(sent2)
         tokenized_pairs.append((tokens1, tokens2, label))
 
     return tokenized_pairs
@@ -135,11 +171,23 @@ def shuffle_arrays(*arrays):
         np.random.set_state(rng_state)
 
 
-def convert_labels(pairs):
+def create_label_dict(pairs):
+    """
+    Return a dictionary mapping the labels found in `pairs` to numbers
+    :param pairs: a list of tuples (_, _, label), with label as a string
+    :return: a dict
+    """
+    labels = set(pair[2] for pair in pairs)
+    mapping = zip(labels, range(len(labels)))
+    return dict(mapping)
+
+
+def convert_labels(pairs, label_map):
     """
     Return a numpy array representing the labels in `pairs`
 
     :param pairs: a list of tuples (_, _, label), with label as a string
+    :param label_map: dictionary mapping label strings to numbers
     :return: a numpy array
     """
     return np.array([label_map[pair[2]] for pair in pairs], dtype=np.int32)
@@ -158,11 +206,12 @@ def find_max_len(pairs, index):
     return max(len(pair[index]) for pair in pairs)
 
 
-def generate_dataset(pairs, word_dict, max_len1=None, max_len2=None):
+def create_dataset(pairs, word_dict, label_dict, max_len1=None, max_len2=None):
     """
     Generate and return a RTEDataset object for storing the data in numpy format.
     :param pairs: list of tokenized tuples (sent1, sent2, label)
     :param word_dict: a dictionary mapping words to indices
+    :param label_dict: a dictionary mapping labels to numbers
     :param max_len1: the maximum length that arrays for sentence 1
         should have (i.e., time steps for an LSTM). If None, it
         is computed from the data.
@@ -175,7 +224,7 @@ def generate_dataset(pairs, word_dict, max_len1=None, max_len2=None):
                                                    max_len1)
     sentences2, sizes2 = _convert_pairs_to_indices(tokens2, word_dict,
                                                    max_len2)
-    labels = convert_labels(pairs)
+    labels = convert_labels(pairs, label_dict)
 
     return RTEDataset(sentences1, sentences2, sizes1, sizes2, labels)
 

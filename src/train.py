@@ -13,7 +13,7 @@ import tensorflow as tf
 
 import ioutils
 import utils
-import multimlp
+from classifiers import LSTMClassifier, MultiFeedForwardClassifier
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
@@ -90,11 +90,11 @@ if __name__ == '__main__':
     sess = tf.InteractiveSession()
     logger.info('Creating model')
     embedding_size = embeddings.shape[1]
-    model = multimlp.MultiFeedForward(args.num_units, max_size1, max_size2, 3,
-                                      embedding_size,
-                                      use_intra_attention=args.use_intra,
-                                      training=True, learning_rate=args.rate,
-                                      clip_value=args.clip_norm, l2_constant=args.l2)
+    model = LSTMClassifier(args.num_units, max_size1, max_size2, 3,
+                                embedding_size,
+                                use_intra_attention=args.use_intra,
+                                training=True, learning_rate=args.rate,
+                                clip_value=args.clip_norm, l2_constant=args.l2)
     model.initialize(sess, embeddings)
 
     total_params = 0

@@ -209,6 +209,7 @@ def find_max_len(pairs, index):
 def create_dataset(pairs, word_dict, label_dict, max_len1=None, max_len2=None):
     """
     Generate and return a RTEDataset object for storing the data in numpy format.
+
     :param pairs: list of tokenized tuples (sent1, sent2, label)
     :param word_dict: a dictionary mapping words to indices
     :param label_dict: a dictionary mapping labels to numbers

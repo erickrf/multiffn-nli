@@ -3,7 +3,6 @@
 from __future__ import print_function
 
 import tensorflow as tf
-import numpy as np
 import json
 import os
 
@@ -44,13 +43,13 @@ def clip_sentence(sentence, sizes):
     Clip the input sentence placeholders to the length of the longest one in the
     batch. This saves processing time.
 
-    :param sentence: tensor with shape (time_steps, batch)
+    :param sentence: tensor with shape (batch, time_steps)
     :param sizes: tensor with shape (batch)
-    :return: tensor with shape (time_steps, batch)
+    :return: tensor with shape (batch, time_steps)
     """
     max_batch_size = tf.reduce_max(sizes)
     clipped_sent = tf.slice(sentence, [0, 0],
-                            tf.pack([max_batch_size, -1]))
+                            tf.pack([-1, max_batch_size]))
     return clipped_sent
 
 
@@ -88,11 +87,11 @@ def get_weights_and_biases():
     Return all weight and bias variables
     :return:
     """
-    return [var for var in tf.all_variables()
+    return [var for var in tf.global_variables()
             if 'weight' in var.name or 'bias' in var.name]
 
 
-class MultiFeedForward(object):
+class MultiFeedForwardClassifier(object):
     """
     Implementation of the multi feed forward network model described in
     the paper "A Decomposable Attention Model for Natural Language
@@ -112,8 +111,9 @@ class MultiFeedForward(object):
         self.use_intra = use_intra_attention
         self.distance_biases = distance_biases
         self.embeddings_ph = tf.placeholder(tf.float32, (None, embedding_size), 'embeddings')
-        self.sentence1 = tf.placeholder(tf.int32, (max_size1, None), 'sentence1')
-        self.sentence2 = tf.placeholder(tf.int32, (max_size2, None), 'sentence2')
+        # sentence plaholders have shape (batch, time_steps)
+        self.sentence1 = tf.placeholder(tf.int32, (None, None), 'sentence1')
+        self.sentence2 = tf.placeholder(tf.int32, (None, None), 'sentence2')
         self.sentence1_size = tf.placeholder(tf.int32, [None], 'sent1_size')
         self.sentence2_size = tf.placeholder(tf.int32, [None], 'sent2_size')
         self.label = tf.placeholder(tf.int32, [None], 'label')
@@ -122,6 +122,7 @@ class MultiFeedForward(object):
         self.clip_value = clip_value
         self.dropout_keep = tf.placeholder(tf.float32, None, 'dropout')
         self.embedding_size = embedding_size
+        self._extra_init()
 
         # we initialize the embeddings from a placeholder to circumvent
         # tensorflow's limitation of 2 GB nodes in the graph
@@ -136,20 +137,21 @@ class MultiFeedForward(object):
         embedded2 = tf.nn.embedding_lookup(self.embeddings, clipped_sent2)
         projected1 = self.project_embeddings(embedded1)
         projected2 = self.project_embeddings(embedded2, True)
-
         # the architecture has 3 main steps: soft align, compare and aggregate
 
-        # alpha and beta have shape (batch, time_steps, embeddings)
         if use_intra_attention:
+            # here, repr's have shape (batch , time_steps, 2*num_units)
             repr1 = self.compute_intra_attention(projected1)
             repr2 = self.compute_intra_attention(projected2, True)
         else:
+            # in this case, repr's have shape (batch, time_steps, num_units)
             repr1 = projected1
             repr2 = projected2
 
+        # alpha and beta have shape (batch, time_steps, embeddings)
         self.alpha, self.beta = self.attend(repr1, repr2)
-        self.v1 = self.compare(repr1, self.beta)
-        self.v2 = self.compare(repr2, self.alpha, True)
+        self.v1 = self.compare(repr1, self.beta, self.sentence1_size)
+        self.v2 = self.compare(repr2, self.alpha, self.sentence2_size, True)
         self.logits = self.aggregate(self.v1, self.v2)
         self.answer = tf.argmax(self.logits, 1, 'answer')
 
@@ -157,15 +159,21 @@ class MultiFeedForward(object):
             self._create_training_tensors()
             self.merged_summaries = tf.merge_all_summaries()
 
+    def _extra_init(self):
+        """
+        Entry point for subclasses initialize more stuff
+        """
+        pass
+
     def project_embeddings(self, embeddings, reuse_weights=False):
         """
         Project word embeddings into another dimensionality
 
-        :param embeddings: embedded sentence, shape (time_steps, batch, embedding_size)
+        :param embeddings: embedded sentence, shape (batch, time_steps, embedding_size)
         :param reuse_weights: reuse weights in internal layers
         :return: projected embeddings with shape (batch, time_steps, num_units)
         """
-        time_steps = tf.shape(embeddings)[0]
+        time_steps = tf.shape(embeddings)[1]
         embeddings_2d = tf.reshape(embeddings, [-1, self.embedding_size])
 
         with tf.variable_scope('projection', reuse=reuse_weights):
@@ -177,9 +185,8 @@ class MultiFeedForward(object):
 
             projected = tf.matmul(embeddings_2d, weights)
 
-        projected_3d = tf.reshape(projected, tf.pack([time_steps, -1, self.num_units]))
-        projected_3d_batch_first = tf.transpose(projected_3d, [1, 0, 2])
-        return projected_3d_batch_first
+        projected_3d = tf.reshape(projected, tf.pack([-1, time_steps, self.num_units]))
+        return projected_3d
 
     def _relu_layer(self, inputs, weights, bias):
         """
@@ -194,7 +201,7 @@ class MultiFeedForward(object):
         raw_values = tf.nn.xw_plus_b(after_dropout, weights, bias)
         return tf.nn.relu(raw_values)
 
-    def _apply_network(self, inputs, num_input_units, reuse_weights=False):
+    def _apply_feedforward(self, inputs, num_input_units, reuse_weights=False):
         """
         Apply two feed forward layers with self.num_units on the inputs.
         :param inputs: tensor in shape (batch, time_steps, num_input_units)
@@ -268,8 +275,8 @@ class MultiFeedForward(object):
             # this is F_intra in the paper
             # f_intra1 is (batch, time_steps, num_units) and
             # f_intra1_t is (batch, num_units, time_steps)
-            f_intra = self._apply_network(sentence, self.num_units,
-                                          reuse_weights=reuse_weights)
+            f_intra = self._apply_feedforward(sentence, self.num_units,
+                                              reuse_weights=reuse_weights)
             f_intra_t = tf.transpose(f_intra, [0, 2, 1])
 
             # these are f_ij
@@ -306,8 +313,10 @@ class MultiFeedForward(object):
 
             # repr1 has shape (batch, time_steps, num_units)
             # repr2 has shape (batch, num_units, time_steps)
-            repr1 = self._apply_network(sent1, num_units)
-            repr2 = self._apply_network(sent2, num_units, True)
+            repr1 = self._transformation_attend(sent1, num_units,
+                                                self.sentence1_size)
+            repr2 = self._transformation_attend(sent2, num_units,
+                                                self.sentence2_size, True)
             repr2 = tf.transpose(repr2, [0, 2, 1])
 
             # compute the unnormalized attention for all word pairs
@@ -327,7 +336,21 @@ class MultiFeedForward(object):
 
         return alpha, beta
 
-    def compare(self, sentence, soft_alignment, reuse_weights=False):
+    def _transformation_attend(self, sentence, num_units, length,
+                               reuse_weights=False):
+        """
+        Apply the transformation on each sentence before attending over each
+        other. In the original model, it is a two layer feed forward network.
+        :param sentence: a tensor with shape (batch, time_steps, num_units)
+        :param num_units: a python int indicating the third dimension of sentence
+        :param length: real length of the sentence. Not used in this class.
+        :param reuse_weights: whether to reuse weights inside this scope
+        :return: a tensor with shape (batch, time_steps, num_units)
+        """
+        return self._apply_feedforward(sentence, num_units, reuse_weights)
+
+    def compare(self, sentence, soft_alignment, sentence_length,
+                reuse_weights=False):
         """
         Apply a feed forward network to compare the one sentence to its
         soft alignment with the other.
@@ -349,7 +372,8 @@ class MultiFeedForward(object):
             # sent_and_alignment has shape (batch, time_steps, num_units)
             sent_and_alignment = tf.concat(2, [sentence, soft_alignment])
 
-            output = self._apply_network(sent_and_alignment, num_units)
+            output = self._transformation_compare(sent_and_alignment, num_units,
+                                                  sentence_length)
 
         return output
 
@@ -375,10 +399,32 @@ class MultiFeedForward(object):
                 bias_linear = tf.get_variable('bias', [self.num_classes],
                                               initializer=tf.zeros_initializer)
 
-            pre_logits = self._apply_network(concat_v, 2 * self.num_units)
+            num_units = self._num_units_on_aggregate()
+            pre_logits = self._apply_feedforward(concat_v, num_units)
             logits = tf.nn.xw_plus_b(pre_logits, weights_linear, bias_linear)
 
         return logits
+
+    def _num_units_on_aggregate(self):
+        """
+        Return the number of units used by the network when computing
+        the aggregated representation of the two sentences.
+        """
+        return 2 * self.num_units
+
+    def _transformation_compare(self, sentence, num_units, length,
+                                reuse_weights=False):
+        """
+        Apply the transformation on each attended token before comparing.
+        In the original model, it is a two layer feed forward network.
+
+        :param sentence: a tensor with shape (batch, time_steps, num_units)
+        :param num_units: a python int indicating the third dimension of sentence
+        :param length: real length of the sentence. Not used in this class.
+        :param reuse_weights: whether to reuse weights inside this scope
+        :return: a tensor with shape (batch, time_steps, num_units)
+        """
+        return self._apply_feedforward(sentence, num_units, reuse_weights)
 
     def _create_training_tensors(self):
         """
@@ -391,7 +437,7 @@ class MultiFeedForward(object):
             cross_entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(self.logits,
                                                                            self.label)
             labeled_loss = tf.reduce_mean(cross_entropy)
-            weights = [v for v in tf.all_variables() if 'weight' in v.name]
+            weights = [v for v in tf.global_variables() if 'weight' in v.name]
             if self.l2_constant > 0:
                 l2_partial_sum = sum([tf.nn.l2_loss(weight) for weight in weights])
                 l2_loss = tf.mul(self.l2_constant, l2_partial_sum, 'l2_loss')
@@ -421,7 +467,7 @@ class MultiFeedForward(object):
         :param session: tensorflow session
         :param embeddings: the contents of the word embeddings
         """
-        init_op = tf.initialize_all_variables()
+        init_op = tf.global_variables_initializer()
         session.run(init_op, {self.embeddings_ph: embeddings})
 
     @classmethod
@@ -510,9 +556,8 @@ class MultiFeedForward(object):
             while batch_index < train_dataset.num_items:
                 batch_index2 = batch_index + batch_size
 
-                # transpose arrays so that input is (num_time_steps, batch_size)
-                feeds = {self.sentence1: train_dataset.sentences1[batch_index:batch_index2].T,
-                         self.sentence2: train_dataset.sentences2[batch_index:batch_index2].T,
+                feeds = {self.sentence1: train_dataset.sentences1[batch_index:batch_index2],
+                         self.sentence2: train_dataset.sentences2[batch_index:batch_index2],
                          self.sentence1_size: train_dataset.sizes1[batch_index:batch_index2],
                          self.sentence2_size: train_dataset.sizes2[batch_index:batch_index2],
                          self.label: train_dataset.labels[batch_index:batch_index2],
@@ -530,8 +575,8 @@ class MultiFeedForward(object):
                     avg_loss = accumulated_loss / report_interval
                     accumulated_loss = 0
 
-                    feeds = {self.sentence1: valid_dataset.sentences1.T,
-                             self.sentence2: valid_dataset.sentences2.T,
+                    feeds = {self.sentence1: valid_dataset.sentences1,
+                             self.sentence2: valid_dataset.sentences2,
                              self.sentence1_size: valid_dataset.sizes1,
                              self.sentence2_size: valid_dataset.sizes2,
                              self.label: valid_dataset.labels,

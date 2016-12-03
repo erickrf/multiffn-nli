@@ -10,7 +10,7 @@ import argparse
 import tensorflow as tf
 import numpy as np
 
-import multimlp
+from src.classifiers import multimlp
 import utils
 import ioutils
 
@@ -92,7 +92,7 @@ if __name__ == '__main__':
 
     logger.info('Reading model')
     sess = tf.InteractiveSession()
-    model = multimlp.MultiFeedForward.load(args.load, sess)
+    model = multimlp.MultiFeedForwardClassifier.load(args.load, sess)
     word_dict, embeddings = ioutils.load_embeddings(args.embeddings, args.vocab,
                                                     generate=False,
                                                     load_extra_from=args.load)

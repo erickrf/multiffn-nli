@@ -10,7 +10,7 @@ import argparse
 import tensorflow as tf
 import numpy as np
 
-from src.classifiers import multimlp
+from classifiers import multimlp
 import utils
 import ioutils
 
@@ -38,24 +38,27 @@ class SentenceWrapper(object):
     def tokens_with_null(self):
         return [utils.GO] + self.tokens
 
-    def convert_sentence(self, num_time_steps):
+    def convert_sentence(self):
         """
         Convert a sequence of tokens into the input array used by the network
         :return: the vector to be given to the network
         """
         indices = np.array(self.indices)
-        padded = np.pad(indices, (0, num_time_steps - len(indices)),
-                        'constant', constant_values=self.padding_index)
-        return padded.reshape((num_time_steps, 1))
+        # padded = np.pad(indices, (0, num_time_steps - len(indices)),
+        #                 'constant', constant_values=self.padding_index)
+        return indices.reshape((1, -1))
 
 
 def print_attention(tokens1, tokens2, attention):
+    """
+    Print the attention from tokens1 over tokens2
+    """
     # multiply by 10 to make it easier to visualize
     attention_bigger = attention * 10
     max_length_sent1 = max([len(t) for t in tokens1])
 
     # create formatting string to match the size of the tokens
-    att_formatters = ['{:>%d.2}' % len(t) for t in tokens2]
+    att_formatters = ['{:>%d.2f}' % len(t) for t in tokens2]
 
     # first line has whitespace in the first sentence column and
     # then the second one
@@ -82,6 +85,8 @@ if __name__ == '__main__':
     parser.add_argument('embeddings', help='Text or numpy file with word embeddings')
     parser.add_argument('--vocab', help='Vocabulary file (only needed if numpy'
                                         'embedding file is given)')
+    parser.add_argument('-a', help='Print attention values', dest='attention',
+                        action='store_true')
     args = parser.parse_args()
 
     utils.config_logger(verbose=False)
@@ -107,8 +112,8 @@ if __name__ == '__main__':
         sent2 = SentenceWrapper(sent2, word_dict,
                                 params['lowercase'], params['language'])
 
-        vector1 = sent1.convert_sentence(model.max_time_steps1)
-        vector2 = sent2.convert_sentence(model.max_time_steps2)
+        vector1 = sent1.convert_sentence()
+        vector2 = sent2.convert_sentence()
         # +1 for NULL symbol
         size1 = len(sent1) + 1
         size2 = len(sent2) + 1
@@ -119,7 +124,15 @@ if __name__ == '__main__':
                  model.sentence2_size: [size2],
                  model.dropout_keep: 1.0}
 
-        answer = sess.run(model.answer, feed_dict=feeds)
+        ops = [model.answer, model.inter_att1, model.inter_att2]
+        answer, att1, att2 = sess.run(ops, feed_dict=feeds)
         print('Model answer:', number_to_label[answer[0]])
+        if args.attention:
+            print('Attention sentence 1:')
+            print_attention(sent1.tokens_with_null,
+                            sent2.tokens_with_null, att1[0])
+            print('Attention sentence 2:')
+            print_attention(sent2.tokens_with_null,
+                            sent1.tokens_with_null, att2[0])
 
         print()

@@ -100,17 +100,22 @@ class MultiFeedForwardClassifier(object):
     It applies feedforward MLPs to combinations of parts of the two sentences,
     without any recurrent structure.
     """
-    def __init__(self, num_units, max_size1, max_size2, num_classes, embedding_size,
-                 use_intra_attention=False, training=True, learning_rate=0.001,
-                 clip_value=None, l2_constant=0.0, distance_biases=10):
+    def __init__(self, num_units, num_classes,
+                 vocab_size, embedding_size, use_intra_attention=False,
+                 training=True, learning_rate=0.001, clip_value=None,
+                 l2_constant=0.0, project_input=True, distance_biases=10):
 
-        self.max_time_steps1 = max_size1
-        self.max_time_steps2 = max_size2
         self.num_units = num_units
         self.num_classes = num_classes
         self.use_intra = use_intra_attention
+        self.project_input = project_input
         self.distance_biases = distance_biases
-        self.embeddings_ph = tf.placeholder(tf.float32, (None, embedding_size), 'embeddings')
+
+        # we have to supply the vocab size to allow validate_shape on the
+        # embeddings variable, which is necessary down in the graph to determine
+        # the shape of inputs at graph construction time
+        self.embeddings_ph = tf.placeholder(tf.float32, (vocab_size, embedding_size),
+                                            'embeddings')
         # sentence plaholders have shape (batch, time_steps)
         self.sentence1 = tf.placeholder(tf.int32, (None, None), 'sentence1')
         self.sentence2 = tf.placeholder(tf.int32, (None, None), 'sentence2')
@@ -127,7 +132,7 @@ class MultiFeedForwardClassifier(object):
         # we initialize the embeddings from a placeholder to circumvent
         # tensorflow's limitation of 2 GB nodes in the graph
         self.embeddings = tf.Variable(self.embeddings_ph, trainable=False,
-                                      validate_shape=False)
+                                      validate_shape=True)
 
         # clip the sentences to the length of the longest one in the batch
         # this saves processing time
@@ -135,19 +140,27 @@ class MultiFeedForwardClassifier(object):
         clipped_sent2 = clip_sentence(self.sentence2, self.sentence2_size)
         embedded1 = tf.nn.embedding_lookup(self.embeddings, clipped_sent1)
         embedded2 = tf.nn.embedding_lookup(self.embeddings, clipped_sent2)
-        projected1 = self.project_embeddings(embedded1)
-        projected2 = self.project_embeddings(embedded2, True)
-        # the architecture has 3 main steps: soft align, compare and aggregate
+
+        if project_input:
+            projected1 = self.project_embeddings(embedded1)
+            projected2 = self.project_embeddings(embedded2, True)
+            self.representation_size = self.num_units
+        else:
+            projected1 = embedded1
+            projected2 = embedded2
+            self.representation_size = self.embedding_size
 
         if use_intra_attention:
             # here, repr's have shape (batch , time_steps, 2*num_units)
             repr1 = self.compute_intra_attention(projected1)
             repr2 = self.compute_intra_attention(projected2, True)
+            self.representation_size *= 2
         else:
             # in this case, repr's have shape (batch, time_steps, num_units)
             repr1 = projected1
             repr2 = projected2
 
+        # the architecture has 3 main steps: soft align, compare and aggregate
         # alpha and beta have shape (batch, time_steps, embeddings)
         self.alpha, self.beta = self.attend(repr1, repr2)
         self.v1 = self.compare(repr1, self.beta, self.sentence1_size)
@@ -201,7 +214,8 @@ class MultiFeedForwardClassifier(object):
         raw_values = tf.nn.xw_plus_b(after_dropout, weights, bias)
         return tf.nn.relu(raw_values)
 
-    def _apply_feedforward(self, inputs, num_input_units, reuse_weights=False):
+    def _apply_feedforward(self, inputs, num_input_units, scope,
+                           reuse_weights=False):
         """
         Apply two feed forward layers with self.num_units on the inputs.
         :param inputs: tensor in shape (batch, time_steps, num_input_units)
@@ -218,18 +232,22 @@ class MultiFeedForwardClassifier(object):
         else:
             inputs2d = inputs
 
-        with tf.variable_scope('feedforward', reuse=reuse_weights):
+        scope = scope or 'feedforward'
+        with tf.variable_scope(scope, reuse=reuse_weights):
             initializer = tf.random_normal_initializer(0.0, 0.1)
 
             with tf.variable_scope('layer1'):
                 shape = [num_input_units, self.num_units]
                 weights1 = tf.get_variable('weights', shape, initializer=initializer)
-                bias1 = tf.Variable(tf.zeros([self.num_units]), name='bias')
+                zero_init = tf.zeros_initializer([self.num_units])
+                bias1 = tf.get_variable('bias', dtype=tf.float32,
+                                        initializer=zero_init)
 
             with tf.variable_scope('layer2'):
                 shape = [self.num_units, self.num_units]
                 weights2 = tf.get_variable('weights', shape, initializer=initializer)
-                bias2 = tf.Variable(tf.zeros([self.num_units]), name='bias')
+                bias2 = tf.get_variable('bias', dtype=tf.float32,
+                                        initializer=zero_init)
 
             # relus are (time_steps * batch, num_units)
             relus1 = self._relu_layer(inputs2d, weights1, bias1)
@@ -271,11 +289,12 @@ class MultiFeedForwardClassifier(object):
         :return: a tensor in shape (batch, time_steps, 2*num_units)
         """
         time_steps = tf.shape(sentence)[1]
-        with tf.variable_scope('intra-attention'):
+        with tf.variable_scope('intra-attention') as scope:
             # this is F_intra in the paper
             # f_intra1 is (batch, time_steps, num_units) and
             # f_intra1_t is (batch, num_units, time_steps)
             f_intra = self._apply_feedforward(sentence, self.num_units,
+                                              scope,
                                               reuse_weights=reuse_weights)
             f_intra_t = tf.transpose(f_intra, [0, 2, 1])
 
@@ -303,13 +322,9 @@ class MultiFeedForwardClassifier(object):
         :param sent2: tensor in shape (batch, time_steps, num_units)
         :return: a tuple of 3-d tensors, alfa and beta.
         """
-        with tf.variable_scope('inter-attention'):
+        with tf.variable_scope('inter-attention') as self.attend_scope:
             # this is F in the paper
-
-            if self.use_intra:
-                num_units = 2 * self.num_units
-            else:
-                num_units = self.num_units
+            num_units = self.representation_size
 
             # repr1 has shape (batch, time_steps, num_units)
             # repr2 has shape (batch, num_units, time_steps)
@@ -347,12 +362,13 @@ class MultiFeedForwardClassifier(object):
         :param reuse_weights: whether to reuse weights inside this scope
         :return: a tensor with shape (batch, time_steps, num_units)
         """
-        return self._apply_feedforward(sentence, num_units, reuse_weights)
+        return self._apply_feedforward(sentence, num_units, self.attend_scope,
+                                       reuse_weights)
 
     def compare(self, sentence, soft_alignment, sentence_length,
                 reuse_weights=False):
         """
-        Apply a feed forward network to compare the one sentence to its
+        Apply a feed forward network to compare one sentence to its
         soft alignment with the other.
 
         :param sentence: embedded and projected sentence,
@@ -361,19 +377,15 @@ class MultiFeedForwardClassifier(object):
         :param reuse_weights: whether to reuse weights in the internal layers
         :return: a tensor (batch, time_steps, num_units)
         """
-        with tf.variable_scope('comparison', reuse=reuse_weights):
-            if self.use_intra:
-                # sentence representation has 2*self.num_units, plus
-                # 2*self.num_units from the soft alignments
-                num_units = 4 * self.num_units
-            else:
-                num_units = 2 * self.num_units
+        with tf.variable_scope('comparison', reuse=reuse_weights) \
+                as self.compare_scope:
+            num_units = 2 * self.representation_size
 
             # sent_and_alignment has shape (batch, time_steps, num_units)
             sent_and_alignment = tf.concat(2, [sentence, soft_alignment])
 
             output = self._transformation_compare(sent_and_alignment, num_units,
-                                                  sentence_length)
+                                                  sentence_length, reuse_weights)
 
         return output
 
@@ -390,7 +402,7 @@ class MultiFeedForwardClassifier(object):
         v2_sum = tf.reduce_sum(v2, [1])
         concat_v = tf.concat(1, [v1_sum, v2_sum])
 
-        with tf.variable_scope('aggregation'):
+        with tf.variable_scope('aggregation') as self.aggregate_scope:
             initializer = tf.random_normal_initializer(0.0, 0.1)
             with tf.variable_scope('linear'):
                 shape = [self.num_units, self.num_classes]
@@ -400,7 +412,8 @@ class MultiFeedForwardClassifier(object):
                                               initializer=tf.zeros_initializer)
 
             num_units = self._num_units_on_aggregate()
-            pre_logits = self._apply_feedforward(concat_v, num_units)
+            pre_logits = self._apply_feedforward(concat_v, num_units,
+                                                 self.aggregate_scope)
             logits = tf.nn.xw_plus_b(pre_logits, weights_linear, bias_linear)
 
         return logits
@@ -424,7 +437,8 @@ class MultiFeedForwardClassifier(object):
         :param reuse_weights: whether to reuse weights inside this scope
         :return: a tensor with shape (batch, time_steps, num_units)
         """
-        return self._apply_feedforward(sentence, num_units, reuse_weights)
+        return self._apply_feedforward(sentence, num_units, self.compare_scope,
+                                       reuse_weights)
 
     def _create_training_tensors(self):
         """
@@ -458,7 +472,7 @@ class MultiFeedForwardClassifier(object):
         :param embeddings: the contents of the word embeddings
         :return:
         """
-        init_op = tf.initialize_variables([self.embeddings])
+        init_op = tf.variables_initializer([self.embeddings])
         session.run(init_op, {self.embeddings_ph: embeddings})
 
     def initialize(self, session, embeddings):
@@ -480,8 +494,9 @@ class MultiFeedForwardClassifier(object):
         """
         params = utils.load_parameters(dirname)
 
-        model = cls(params['num_units'], params['time_steps1'], params['time_steps2'],
-                    params['num_classes'], params['embedding_size'], training=False)
+        model = cls(params['num_units'], params['num_classes'],
+                    params['vocab_size'],
+                    params['embedding_size'], training=False)
 
         tensorflow_file = os.path.join(dirname, 'model')
         saver = tf.train.Saver(get_weights_and_biases())
@@ -493,10 +508,10 @@ class MultiFeedForwardClassifier(object):
         """
         Return a dictionary with data for reconstructing a persisted object
         """
-        data = {'time_steps1': self.max_time_steps1,
-                'time_steps2': self.max_time_steps2,
-                'num_units': self.num_units,
+        vocab_size = self.embeddings.get_shape()[0].value
+        data = {'num_units': self.num_units,
                 'num_classes': self.num_classes,
+                'vocab_size': vocab_size,
                 'embedding_size': self.embedding_size}
 
         return data
@@ -515,7 +530,7 @@ class MultiFeedForwardClassifier(object):
         saver.save(session, tensorflow_file)
 
     def train(self, session, train_dataset, valid_dataset,
-              num_epochs, batch_size, dropout_keep, save_dir, log_dir,
+              num_epochs, batch_size, dropout_keep, save_dir,
               report_interval=100):
         """
         Train the model with the specified parameters
@@ -527,7 +542,6 @@ class MultiFeedForwardClassifier(object):
         :param batch_size: how many items in each minibatch.
         :param dropout_keep: dropout keep probability (applied at LSTM input and output)
         :param save_dir: path to directory to save the model
-        :param log_dir: directory to save logs
         :param report_interval: how many minibatches between each performance report
         :return:
         """
@@ -546,8 +560,8 @@ class MultiFeedForwardClassifier(object):
         vars_to_save = get_weights_and_biases()
 
         saver = tf.train.Saver(vars_to_save, max_to_keep=1)
-        summ_writer = tf.train.SummaryWriter(log_dir, session.graph)
-        summ_writer.add_graph(session.graph)
+        # summ_writer = tf.train.SummaryWriter(log_dir, session.graph)
+        # summ_writer.add_graph(session.graph)
 
         for i in range(num_epochs):
             train_dataset.shuffle_data()
@@ -564,14 +578,14 @@ class MultiFeedForwardClassifier(object):
                          self.dropout_keep: dropout_keep
                          }
 
-                ops = [self.train_op, self.loss, self.merged_summaries]
-                _, loss, summaries = session.run(ops, feed_dict=feeds)
+                ops = [self.train_op, self.loss]
+                _, loss = session.run(ops, feed_dict=feeds)
                 accumulated_loss += loss
 
                 batch_index = batch_index2
                 batch_counter += 1
                 if batch_counter % report_interval == 0:
-                    summ_writer.add_summary(summaries, batch_counter)
+                    # summ_writer.add_summary(summaries, batch_counter)
                     avg_loss = accumulated_loss / report_interval
                     accumulated_loss = 0
 
@@ -597,5 +611,5 @@ class MultiFeedForwardClassifier(object):
 
                     logger.info(msg)
 
-        summ_writer.flush()
-        summ_writer.close()
+        # summ_writer.flush()
+        # summ_writer.close()

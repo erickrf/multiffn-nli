@@ -94,7 +94,8 @@ class AlignPretrainer(Trainable):
                  self.alignments: label,
                  self.learning_rate: learning_rate,
                  self.classifier.dropout_keep: dropout_keep,
-                 self.l2_constant: l2
+                 self.l2_constant: l2,
+                 self.clip_value: clip_value
                  }
 
         return feeds

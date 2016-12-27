@@ -87,6 +87,8 @@ if __name__ == '__main__':
                                         'embedding file is given)')
     parser.add_argument('-a', help='Print attention values', dest='attention',
                         action='store_true')
+    parser.add_argument('-i', help='Run inference classifier', dest='inference',
+                        action='store_true')
     args = parser.parse_args()
 
     utils.config_logger(verbose=False)
@@ -103,6 +105,13 @@ if __name__ == '__main__':
                                                     load_extra_from=args.load)
     embeddings = utils.normalize_embeddings(embeddings)
     model.initialize_embeddings(sess, embeddings)
+
+    ops = []
+    if args.inference:
+        ops.append(model.answer)
+    if args.attention:
+        ops.append(model.inter_att1)
+        ops.append(model.inter_att2)
 
     while True:
         sent1 = raw_input('Type sentence 1: ').decode('utf-8')
@@ -124,10 +133,14 @@ if __name__ == '__main__':
                  model.sentence2_size: [size2],
                  model.dropout_keep: 1.0}
 
-        ops = [model.answer, model.inter_att1, model.inter_att2]
-        answer, att1, att2 = sess.run(ops, feed_dict=feeds)
-        print('Model answer:', number_to_label[answer[0]])
+        results = sess.run(ops, feed_dict=feeds)
+        if args.inference:
+            answer = results.pop(0)
+            print('Model answer:', number_to_label[answer[0]])
+
         if args.attention:
+            att1 = results.pop(0)
+            att2 = results.pop(0)
             print('Attention sentence 1:')
             print_attention(sent1.tokens_with_null,
                             sent2.tokens_with_null, att1[0])

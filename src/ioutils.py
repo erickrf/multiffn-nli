@@ -6,6 +6,7 @@ Functions for reading and writing data to and from files.
 
 import json
 import os
+import logging
 import numpy as np
 import nltk
 from collections import defaultdict
@@ -78,6 +79,7 @@ def load_embeddings(embeddings_path, vocabulary_path=None,
     assert not (generate and load_extra_from), \
         'Either load or generate extra vectors'
 
+    logging.debug('Loading embeddings')
     if vocabulary_path is None:
         wordlist, embeddings = load_text_embeddings(embeddings_path)
     else:
@@ -208,6 +210,28 @@ def load_params(dirname):
     path = os.path.join(dirname, 'system-params.json')
     with open(path, 'rb') as f:
         return json.load(f)
+
+
+def read_alignment(filename, lowercase):
+    """
+    Read a file containing pairs of sentences and their alignments.
+    :param filename: a JSONL file
+    :param lowercase: whether to convert words to lowercase
+    :return: a list of tuples (first_sent, second_sent, alignments)
+    """
+    sentences = []
+    with open(filename, 'rb') as f:
+        for line in f:
+            line = line.decode('utf-8')
+            if lowercase:
+                line = line.lower()
+            data = json.loads(line)
+            sent1 = data['sentence1']
+            sent2 = data['sentence2']
+            alignment = data['alignment']
+            sentences.append((sent1, sent2, alignment))
+
+    return sentences
 
 
 def read_corpus(filename, lowercase, language='en'):

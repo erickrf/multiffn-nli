@@ -1,2 +1,4 @@
 from multimlp import MultiFeedForwardClassifier
 from lstm import LSTMClassifier
+from align_pretrainer import AlignPretrainer
+from trainable import Trainable, get_weights_and_biases

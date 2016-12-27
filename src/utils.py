@@ -11,13 +11,16 @@ import nltk
 import os
 import json
 import numpy as np
+import tensorflow as tf
 from collections import Counter
 from nltk.tokenize.regexp import RegexpTokenizer
+
+import ioutils
 
 tokenizer = nltk.tokenize.TreebankWordTokenizer()
 UNKNOWN = '**UNK**'
 PADDING = '**PAD**'
-GO = '**GO**'
+GO = '**GO**'  # it's called "GO" but actually serves as a null alignment
 
 
 class RTEDataset(object):
@@ -119,6 +122,22 @@ def tokenize_corpus(pairs):
     return tokenized_pairs
 
 
+def count_parameters():
+    """
+    Count the number of trainable tensorflow parameters loaded in
+    the current graph.
+    """
+    total_params = 0
+    for variable in tf.trainable_variables():
+        shape = variable.get_shape()
+        variable_params = 1
+        for dim in shape:
+            variable_params *= dim.value
+        logging.debug('%s: %d params' % (variable.name, variable_params))
+        total_params += variable_params
+    return total_params
+
+
 def count_corpus_tokens(pairs):
     """
     Examine all pairs ans extracts all tokens from both text and hypothesis.
@@ -206,13 +225,78 @@ def find_max_len(pairs, index):
     return max(len(pair[index]) for pair in pairs)
 
 
-def create_dataset(pairs, word_dict, label_dict, max_len1=None, max_len2=None):
+def create_alignment_dataset(filename, lowercase, word_dict,
+                             max_len1=None, max_len2=None):
+    """
+    Generate and return a dataset with alignment data.
+    :param filename: path to corpus file
+    :param lowercase: whether to convert tokens to lowercase
+    :param word_dict: mapping of words to indices
+    :param max_len1: the maximum length that arrays for sentence 1
+        should have (i.e., time steps for an LSTM). If None, it
+        is computed from the data.
+    :param max_len2: same as max_len1 for sentence 2
+    :return: a RTEDataset object
+    """
+    logging.debug('Reading alignment data from %s' % filename)
+    pairs = ioutils.read_alignment(filename, lowercase)
+    alignments = [pair[2] for pair in pairs]
+    dataset = create_dataset(pairs, word_dict, max_len1=max_len1,
+                             max_len2=max_len2)
+    alignment_tensor = _create_alignment_matrices(dataset, alignments)
+    dataset.labels = alignment_tensor
+    return dataset
+
+
+def _create_alignment_matrices(dataset, alignments):
+    """
+    Create the matrices used as target for the alignment network
+    All paddings are aligned to the first token, assumed to be NULL.
+
+    This function creates dense vectors, since as of now tensorflow
+    doesn't accept sparse matrices as placeholder feeds.
+
+    :type dataset: RTEDataset
+    :param dataset: a list of lists of tuples (token_num, token_num)
+    :return: a 3d numpy tensor (num_items, max_size1, max_size2)
+    """
+    # max_size 1 and 2 include the NULL token at the beginning
+    max_size1 = dataset.sentences1.shape[1]
+    max_size2 = dataset.sentences2.shape[1]
+    shape = (dataset.num_items, max_size1, max_size2)
+    alignment_tensor = np.zeros(shape, dtype=np.float32)
+
+    for i, alignment in enumerate(alignments):
+        if len(alignment) == 0:
+            continue
+
+        # each alignment has the format [(i1, j1), (i2, j2), ...]
+        # we unzip them to create array indices [(i1, i2, ...), (j1, j2, ...)]
+        coords = np.array(alignment)
+        indices = coords.T
+        alignment_tensor[i, indices[0], indices[1]] = 1
+
+    # make sure every row and column has at least one alignment
+    # (non-aligned words are aligned to NULL)
+    line_sum = alignment_tensor.sum(2)
+    alignment_tensor[line_sum == 0, 0] = 1
+
+    column_sum = alignment_tensor.sum(1)
+    inds = column_sum == 0
+    alignment_tensor[:, 0, :][inds] = 1
+
+    return alignment_tensor
+
+
+def create_dataset(pairs, word_dict, label_dict=None,
+                   max_len1=None, max_len2=None):
     """
     Generate and return a RTEDataset object for storing the data in numpy format.
 
     :param pairs: list of tokenized tuples (sent1, sent2, label)
     :param word_dict: a dictionary mapping words to indices
-    :param label_dict: a dictionary mapping labels to numbers
+    :param label_dict: a dictionary mapping labels to numbers. If None,
+        labels are ignored.
     :param max_len1: the maximum length that arrays for sentence 1
         should have (i.e., time steps for an LSTM). If None, it
         is computed from the data.
@@ -225,7 +309,10 @@ def create_dataset(pairs, word_dict, label_dict, max_len1=None, max_len2=None):
                                                    max_len1)
     sentences2, sizes2 = _convert_pairs_to_indices(tokens2, word_dict,
                                                    max_len2)
-    labels = convert_labels(pairs, label_dict)
+    if label_dict is not None:
+        labels = convert_labels(pairs, label_dict)
+    else:
+        labels = None
 
     return RTEDataset(sentences1, sentences2, sizes1, sizes2, labels)
 

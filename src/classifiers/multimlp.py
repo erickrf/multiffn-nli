@@ -2,11 +2,13 @@
 
 from __future__ import print_function
 
-import tensorflow as tf
 import json
+import logging
 import os
+import tensorflow as tf
 
 import utils
+from trainable import Trainable, get_weights_and_biases
 
 
 def variable_summaries(var, name):
@@ -82,16 +84,7 @@ def mask_values_after_sentence_end(values, sentence_sizes, value):
     return tf.select(cond, values, mask)
 
 
-def get_weights_and_biases():
-    """
-    Return all weight and bias variables
-    :return:
-    """
-    return [var for var in tf.global_variables()
-            if 'weight' in var.name or 'bias' in var.name]
-
-
-class MultiFeedForwardClassifier(object):
+class MultiFeedForwardClassifier(Trainable):
     """
     Implementation of the multi feed forward network model described in
     the paper "A Decomposable Attention Model for Natural Language
@@ -102,8 +95,7 @@ class MultiFeedForwardClassifier(object):
     """
     def __init__(self, num_units, num_classes,
                  vocab_size, embedding_size, use_intra_attention=False,
-                 training=True, learning_rate=0.001, clip_value=None,
-                 l2_constant=0.0, project_input=True, distance_biases=10):
+                 training=True, project_input=True, distance_biases=10):
 
         self.num_units = num_units
         self.num_classes = num_classes
@@ -122,9 +114,9 @@ class MultiFeedForwardClassifier(object):
         self.sentence1_size = tf.placeholder(tf.int32, [None], 'sent1_size')
         self.sentence2_size = tf.placeholder(tf.int32, [None], 'sent2_size')
         self.label = tf.placeholder(tf.int32, [None], 'label')
-        self.l2_constant = l2_constant
-        self.learning_rate = learning_rate
-        self.clip_value = clip_value
+        self.learning_rate = tf.placeholder(tf.float32, [], name='learning_rate')
+        self.l2_constant = tf.placeholder(tf.float32, [], 'l2_constant')
+        self.clip_value = tf.placeholder(tf.float32, [], 'clip_norm')
         self.dropout_keep = tf.placeholder(tf.float32, None, 'dropout')
         self.embedding_size = embedding_size
         self._extra_init()
@@ -336,12 +328,12 @@ class MultiFeedForwardClassifier(object):
 
             # compute the unnormalized attention for all word pairs
             # raw_attentions has shape (batch, time_steps1, time_steps2)
-            raw_attentions = tf.batch_matmul(repr1, repr2)
+            self.raw_attentions = tf.batch_matmul(repr1, repr2)
 
             # now get the attention softmaxes
-            att_sent1 = attention_softmax3d(raw_attentions)
+            att_sent1 = attention_softmax3d(self.raw_attentions)
 
-            att_transposed = tf.transpose(raw_attentions, [0, 2, 1])
+            att_transposed = tf.transpose(self.raw_attentions, [0, 2, 1])
             att_sent2 = attention_softmax3d(att_transposed)
 
             self.inter_att1 = att_sent1
@@ -452,12 +444,9 @@ class MultiFeedForwardClassifier(object):
                                                                            self.label)
             labeled_loss = tf.reduce_mean(cross_entropy)
             weights = [v for v in tf.global_variables() if 'weight' in v.name]
-            if self.l2_constant > 0:
-                l2_partial_sum = sum([tf.nn.l2_loss(weight) for weight in weights])
-                l2_loss = tf.mul(self.l2_constant, l2_partial_sum, 'l2_loss')
-                self.loss = tf.add(labeled_loss, l2_loss, 'loss')
-            else:
-                self.loss = labeled_loss
+            l2_partial_sum = sum([tf.nn.l2_loss(weight) for weight in weights])
+            l2_loss = tf.mul(self.l2_constant, l2_partial_sum, 'l2_loss')
+            self.loss = tf.add(labeled_loss, l2_loss, 'loss')
 
             optimizer = tf.train.AdagradOptimizer(self.learning_rate)
             gradients, v = zip(*optimizer.compute_gradients(self.loss))
@@ -481,6 +470,7 @@ class MultiFeedForwardClassifier(object):
         :param session: tensorflow session
         :param embeddings: the contents of the word embeddings
         """
+        logging.debug('Initializing embeddings')
         init_op = tf.global_variables_initializer()
         session.run(init_op, {self.embeddings_ph: embeddings})
 
@@ -529,87 +519,114 @@ class MultiFeedForwardClassifier(object):
 
         saver.save(session, tensorflow_file)
 
-    def train(self, session, train_dataset, valid_dataset,
-              num_epochs, batch_size, dropout_keep, save_dir,
+    def _create_batch_feed(self, sentence1, sentence2, size1, size2,
+                           label, learning_rate, dropout_keep, l2, clip_value):
+        feeds = {self.sentence1: sentence1,
+                 self.sentence2: sentence2,
+                 self.sentence1_size: size1,
+                 self.sentence2_size: size2,
+                 self.label: label,
+                 self.learning_rate: learning_rate,
+                 self.dropout_keep: dropout_keep,
+                 self.l2_constant: l2,
+                 self.clip_value: clip_value
+                 }
+        return feeds
+
+    def _run_on_validation(self, session, feeds):
+        loss, acc = session.run([self.loss, self.accuracy], feeds)
+        msg = 'Validation loss: %f\tValidation accuracy: %f' % (loss, acc)
+        return loss, msg
+
+    def train(self, session, train_dataset, valid_dataset, save_dir,
+              learning_rate, num_epochs, batch_size, dropout_keep=1, l2=0,
               report_interval=100):
         """
         Train the model with the specified parameters
         :param session: tensorflow session
         :param train_dataset: an RTEDataset object with training data
         :param valid_dataset: an RTEDataset object with validation data
+        :param save_dir: path to directory to save the model
+        :param learning_rate: the learning rate
         :param num_epochs: number of epochs to run the model. During each epoch,
             all data points are seen exactly once
         :param batch_size: how many items in each minibatch.
-        :param dropout_keep: dropout keep probability (applied at LSTM input and output)
-        :param save_dir: path to directory to save the model
+        :param dropout_keep: dropout keep probability (applied at network
+            input and output)
+        :param l2: l2 loss constant
         :param report_interval: how many minibatches between each performance report
         :return:
         """
-        logger = utils.get_logger('rte_network')
+        train = super(MultiFeedForwardClassifier, self)._train
+        train(session, get_weights_and_biases(), save_dir, train_dataset,
+              valid_dataset, learning_rate, num_epochs, batch_size,
+              dropout_keep, l2, report_interval)
 
-        # this tracks the accumulated loss in a minibatch (to take the average later)
-        accumulated_loss = 0
-
-        best_acc = 0
-
-        # batch counter doesn't reset after each epoch
-        batch_counter = 0
-
-        # get all weights and biases, but not the embeddings
-        # (embeddings are huge and saved separately)
-        vars_to_save = get_weights_and_biases()
-
-        saver = tf.train.Saver(vars_to_save, max_to_keep=1)
-        # summ_writer = tf.train.SummaryWriter(log_dir, session.graph)
-        # summ_writer.add_graph(session.graph)
-
-        for i in range(num_epochs):
-            train_dataset.shuffle_data()
-            batch_index = 0
-
-            while batch_index < train_dataset.num_items:
-                batch_index2 = batch_index + batch_size
-
-                feeds = {self.sentence1: train_dataset.sentences1[batch_index:batch_index2],
-                         self.sentence2: train_dataset.sentences2[batch_index:batch_index2],
-                         self.sentence1_size: train_dataset.sizes1[batch_index:batch_index2],
-                         self.sentence2_size: train_dataset.sizes2[batch_index:batch_index2],
-                         self.label: train_dataset.labels[batch_index:batch_index2],
-                         self.dropout_keep: dropout_keep
-                         }
-
-                ops = [self.train_op, self.loss]
-                _, loss = session.run(ops, feed_dict=feeds)
-                accumulated_loss += loss
-
-                batch_index = batch_index2
-                batch_counter += 1
-                if batch_counter % report_interval == 0:
-                    # summ_writer.add_summary(summaries, batch_counter)
-                    avg_loss = accumulated_loss / report_interval
-                    accumulated_loss = 0
-
-                    feeds = {self.sentence1: valid_dataset.sentences1,
-                             self.sentence2: valid_dataset.sentences2,
-                             self.sentence1_size: valid_dataset.sizes1,
-                             self.sentence2_size: valid_dataset.sizes2,
-                             self.label: valid_dataset.labels,
-                             self.dropout_keep: 1.0
-                             }
-
-                    valid_loss, acc = session.run([self.loss, self.accuracy],
-                                                  feed_dict=feeds)
-
-                    msg = '%d completed epochs, %d batches' % (i, batch_counter)
-                    msg += '\tAverage training batch loss: %f' % avg_loss
-                    msg += '\tValidation loss: %f' % valid_loss
-                    msg += '\tValidation accuracy: %f' % acc
-                    if acc > best_acc:
-                        best_acc = acc
-                        self.save(save_dir, session, saver)
-                        msg += '\t(saved model)'
-
-                    logger.info(msg)
+        # logger = utils.get_logger('rte_network')
+        #
+        # # this tracks the accumulated loss in a minibatch (to take the average later)
+        # accumulated_loss = 0
+        #
+        # best_acc = 0
+        #
+        # # batch counter doesn't reset after each epoch
+        # batch_counter = 0
+        #
+        # # get all weights and biases, but not the embeddings
+        # # (embeddings are huge and saved separately)
+        # vars_to_save = get_weights_and_biases()
+        #
+        # saver = tf.train.Saver(vars_to_save, max_to_keep=1)
+        # # summ_writer = tf.train.SummaryWriter(log_dir, session.graph)
+        # # summ_writer.add_graph(session.graph)
+        #
+        # for i in range(num_epochs):
+        #     train_dataset.shuffle_data()
+        #     batch_index = 0
+        #
+        #     while batch_index < train_dataset.num_items:
+        #         batch_index2 = batch_index + batch_size
+        #
+        #         feeds = {self.sentence1: train_dataset.sentences1[batch_index:batch_index2],
+        #                  self.sentence2: train_dataset.sentences2[batch_index:batch_index2],
+        #                  self.sentence1_size: train_dataset.sizes1[batch_index:batch_index2],
+        #                  self.sentence2_size: train_dataset.sizes2[batch_index:batch_index2],
+        #                  self.label: train_dataset.labels[batch_index:batch_index2],
+        #                  self.dropout_keep: dropout_keep
+        #                  }
+        #
+        #         ops = [self.train_op, self.loss]
+        #         _, loss = session.run(ops, feed_dict=feeds)
+        #         accumulated_loss += loss
+        #
+        #         batch_index = batch_index2
+        #         batch_counter += 1
+        #         if batch_counter % report_interval == 0:
+        #             # summ_writer.add_summary(summaries, batch_counter)
+        #             avg_loss = accumulated_loss / report_interval
+        #             accumulated_loss = 0
+        #
+        #             feeds = {self.sentence1: valid_dataset.sentences1,
+        #                      self.sentence2: valid_dataset.sentences2,
+        #                      self.sentence1_size: valid_dataset.sizes1,
+        #                      self.sentence2_size: valid_dataset.sizes2,
+        #                      self.label: valid_dataset.labels,
+        #                      self.dropout_keep: 1.0
+        #                      }
+        #
+        #             valid_loss, acc = session.run([self.loss, self.accuracy],
+        #                                           feed_dict=feeds)
+        #
+        #             msg = '%d completed epochs, %d batches' % (i, batch_counter)
+        #             msg += '\tAverage training batch loss: %f' % avg_loss
+        #             msg += '\tValidation loss: %f' % valid_loss
+        #             msg += '\tV   alidation accuracy: %f' % acc
+        #             if acc > best_acc:
+        #                 best_acc = acc
+        #                 self.save(save_dir, session, saver)
+        #                 msg += '\t(saved model)'
+        #
+        #             logger.info(msg)
 
         # summ_writer.flush()
         # summ_writer.close()

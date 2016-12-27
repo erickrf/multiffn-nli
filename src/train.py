@@ -89,25 +89,16 @@ if __name__ == '__main__':
     logger.info('Creating model')
     vocab_size = embeddings.shape[0]
     embedding_size = embeddings.shape[1]
-    model = LSTMClassifier(weights, bias, args.num_units,
-                           3, vocab_size, embedding_size,
-                           use_intra_attention=args.use_intra,
-                           training=True, learning_rate=args.rate,
-                           clip_value=args.clip_norm, l2_constant=args.l2,
-                           project_input=args.no_project)
+    model = MultiFeedForwardClassifier(args.num_units, 3, vocab_size,
+                                       embedding_size,
+                                       use_intra_attention=args.use_intra,
+                                       training=True, project_input=args.no_project)
     model.initialize(sess, embeddings)
-
-    total_params = 0
-    for variable in tf.trainable_variables():
-        shape = variable.get_shape()
-        variable_params = 1
-        for dim in shape:
-            variable_params *= dim.value
-        logger.debug('%s: %d params' % (variable.name, variable_params))
-        total_params += variable_params
+    total_params = utils.count_parameters()
 
     logger.debug('Total parameters: %d' % total_params)
 
     logger.info('Starting training')
-    model.train(sess, train_data, valid_data, args.num_epochs, args.batch_size,
-                args.dropout, args.save, args.report)
+    model.train(sess, train_data, valid_data, args.save, args.rate,
+                args.num_epochs, args.batch_size, args.dropout, args.l2,
+                args.report)

@@ -43,7 +43,6 @@ class LSTMClassifier(MultiFeedForwardClassifier):
 
         :param weights: 2d numpy array
         :param bias: 1d numpy array
-        :param num_units: python int
         """
         # this implementation is hacky and I'd like to replace it with
         # something better. but right now I have no idea how.

@@ -94,8 +94,9 @@ if __name__ == '__main__':
     utils.config_logger(verbose=False)
     logger = utils.get_logger()
     params = ioutils.load_params(args.load)
-    label_dict = ioutils.load_label_dict(args.load)
-    number_to_label = {v: k for (k, v) in label_dict.items()}
+    if args.inference:
+        label_dict = ioutils.load_label_dict(args.load)
+        number_to_label = {v: k for (k, v) in label_dict.items()}
 
     logger.info('Reading model')
     sess = tf.InteractiveSession()

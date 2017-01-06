@@ -475,18 +475,19 @@ class MultiFeedForwardClassifier(Trainable):
         session.run(init_op, {self.embeddings_ph: embeddings})
 
     @classmethod
-    def load(cls, dirname, session):
+    def load(cls, dirname, session, training=False):
         """
         Load a previously saved file.
         :param dirname: directory with model files
         :param session: tensorflow session
+        :param training: whether to create training tensors
         :return: an instance of MultiFeedForward
         """
         params = utils.load_parameters(dirname)
 
         model = cls(params['num_units'], params['num_classes'],
                     params['vocab_size'],
-                    params['embedding_size'], training=False)
+                    params['embedding_size'], training=training)
 
         tensorflow_file = os.path.join(dirname, 'model')
         saver = tf.train.Saver(get_weights_and_biases())

@@ -52,15 +52,16 @@ def write_extra_embeddings(embeddings, dirname):
 
 
 def _generate_random_vector(size):
-    """
-    Generate a random vector from a uniform distribution between
-    -0.1 and 0.1.
-    """
-    return np.random.uniform(-0.1, 0.1, size)
+        """
+        Generate a random vector from a uniform distribution between
+        -0.1 and 0.1.
+        """
+        return np.random.uniform(-0.1, 0.1, size)
 
 
 def load_embeddings(embeddings_path, vocabulary_path=None,
-                    generate=True, load_extra_from=None):
+                    generate=True, load_extra_from=None,
+                    normalize=True):
     """
     Load and return an embedding model in either text format or
     numpy binary format. The text format is used if vocabulary_path
@@ -74,6 +75,7 @@ def load_embeddings(embeddings_path, vocabulary_path=None,
         unknown, padding and null
     :param load_extra_from: path to directory with embeddings
         file with vectors for unknown, padding and null
+    :param normalize: whether to normalize embeddings
     :return: a tuple (defaultdict, array)
     """
     assert not (generate and load_extra_from), \
@@ -87,7 +89,7 @@ def load_embeddings(embeddings_path, vocabulary_path=None,
                                                       vocabulary_path)
 
     if generate or load_extra_from:
-        mapping = zip(wordlist, range(3, len(wordlist)))
+        mapping = zip(wordlist, range(3, len(wordlist) + 3))
 
         # always map OOV words to 0
         wd = defaultdict(int, mapping)
@@ -110,6 +112,10 @@ def load_embeddings(embeddings_path, vocabulary_path=None,
     else:
         mapping = zip(wordlist, range(0, len(wordlist)))
         wd = defaultdict(int, mapping)
+
+    logging.debug('Embeddings have shape {}'.format(embeddings.shape))
+    if normalize:
+        embeddings = utils.normalize_embeddings(embeddings)
 
     return wd, embeddings
 
@@ -174,12 +180,14 @@ def load_text_embeddings(path):
     return words, embeddings
 
 
-def write_params(dirname, lowercase, language):
+def write_params(dirname, lowercase, language=None):
     """
     Write system parameters (not related to the networks) to a file.
     """
     path = os.path.join(dirname, 'system-params.json')
-    data = {'lowercase': lowercase, 'language': language}
+    data = {'lowercase': lowercase}
+    if language:
+        data['language'] = language
     with open(path, 'wb') as f:
         json.dump(data, f)
 
@@ -244,6 +252,7 @@ def read_corpus(filename, lowercase, language='en'):
         TSV format)
     :return: a list of tuples (first_sent, second_sent, label)
     """
+    logging.info('Reading data from %s' % filename)
     # we are only interested in the actual sentences + gold label
     # the corpus files has a few more things
     useful_data = []

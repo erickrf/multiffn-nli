@@ -251,7 +251,8 @@ def create_alignment_dataset(filename, lowercase, word_dict,
 def _create_alignment_matrices(dataset, alignments):
     """
     Create the matrices used as target for the alignment network
-    All paddings are aligned to the first token, assumed to be NULL.
+    All paddings are aligned to the first token in the other sentence,
+    assumed to be NULL.
 
     This function creates dense vectors, since as of now tensorflow
     doesn't accept sparse matrices as placeholder feeds.
@@ -272,7 +273,8 @@ def _create_alignment_matrices(dataset, alignments):
 
         # each alignment has the format [(i1, j1), (i2, j2), ...]
         # we unzip them to create array indices [(i1, i2, ...), (j1, j2, ...)]
-        coords = np.array(alignment)
+        # add 1 because the original alignments didn't have NULL
+        coords = np.array(alignment) + 1
         indices = coords.T
         alignment_tensor[i, indices[0], indices[1]] = 1
 
@@ -284,6 +286,9 @@ def _create_alignment_matrices(dataset, alignments):
     column_sum = alignment_tensor.sum(1)
     inds = column_sum == 0
     alignment_tensor[:, 0, :][inds] = 1
+
+    # NULL tokens in both sentence have to be aligned to each other
+    alignment_tensor[:, 0, 0] = 1
 
     return alignment_tensor
 

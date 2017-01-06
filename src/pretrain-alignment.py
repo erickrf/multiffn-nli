@@ -50,6 +50,8 @@ if __name__ == '__main__':
 
     utils.config_logger(args.verbose)
     word_dict, embeddings = ioutils.load_embeddings(args.embeddings, args.vocabulary)
+    ioutils.write_extra_embeddings(embeddings, args.save)
+    ioutils.write_params(args.save, lowercase=args.lower)
     train_dataset = utils.create_alignment_dataset(args.train, args.lower, word_dict)
     valid_dataset = utils.create_alignment_dataset(args.valid, args.lower, word_dict)
 
@@ -59,7 +61,7 @@ if __name__ == '__main__':
                                                    training=False)
     sess = tf.InteractiveSession()
     model.initialize(sess, embeddings)
-    pretrainer = classifiers.AlignPretrainer(model)
+    pretrainer = classifiers.AlignmentWrapper(model)
     pretrainer.initialize(sess)
 
     total_params = utils.count_parameters()

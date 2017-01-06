@@ -104,7 +104,7 @@ class Trainable(object):
 def get_weights_and_biases():
     """
     Return all weight and bias variables
-    :return:
+    :return: a list with tensorflow variables
     """
-    return [var for var in tf.global_variables()
+    return [var for var in tf.trainable_variables()
             if 'weight' in var.name or 'bias' in var.name]

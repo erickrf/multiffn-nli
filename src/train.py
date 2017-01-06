@@ -22,6 +22,8 @@ if __name__ == '__main__':
     parser.add_argument('validation', help='JSONL or TSV file with validation corpus')
     parser.add_argument('save', help='Directory to save the model files')
 
+    parser.add_argument('--load', help='Directory with previously trained '
+                                       'model (ignore -u)')
     parser.add_argument('--vocab', help='Vocabulary file (only needed if numpy'
                                         'embedding file is given)')
     parser.add_argument('-e', dest='num_epochs', default=10, type=int,
@@ -30,6 +32,10 @@ if __name__ == '__main__':
                         type=int)
     parser.add_argument('-u', dest='num_units', help='Number of hidden units',
                         default=100, type=int)
+    parser.add_argument('--no-proj', help='Do not project input embeddings to the '
+                                          'same dimensionality used by internal networks',
+                        action='store_false', dest='no_project')
+
     parser.add_argument('-d', dest='dropout', help='Dropout keep probability',
                         default=1.0, type=float)
     parser.add_argument('-c', dest='clip_norm', help='Norm to clip training gradients',
@@ -38,9 +44,7 @@ if __name__ == '__main__':
                         dest='rate')
     parser.add_argument('-w', help='Numpy file with pretrained weights and biases '
                                    'for the LSTM', dest='weights')
-    parser.add_argument('--no-proj', help='Do not project input embeddings to the '
-                                          'same dimensionality used by internal networks',
-                        action='store_false', dest='no_project')
+
     parser.add_argument('--lang', choices=['en', 'pt'], default='en',
                         help='Language (default en; only affects tokenizer)')
     parser.add_argument('--lower', help='Lowercase the corpus (use it if the embedding '
@@ -56,15 +60,15 @@ if __name__ == '__main__':
 
     utils.config_logger(args.verbose)
     logger = utils.get_logger('train')
-    logger.info('Reading training data')
     train_pairs = ioutils.read_corpus(args.train, args.lower, args.lang)
-    logger.info('Reading validation data')
     valid_pairs = ioutils.read_corpus(args.validation, args.lower, args.lang)
-    logger.info('Reading word embeddings')
-    word_dict, embeddings = ioutils.load_embeddings(args.embeddings, args.vocab)
-    embeddings = utils.normalize_embeddings(embeddings)
-    logger.debug('Embeddings have shape {} (including unknown, padding and null)'
-                 .format(embeddings.shape))
+
+    # whether to generate embeddings for unknown, padding, null
+    generate_new_embs = not args.load
+    word_dict, embeddings = ioutils.load_embeddings(args.embeddings, args.vocab,
+                                                    generate_new_embs,
+                                                    args.load,
+                                                    normalize=True)
 
     logger.info('Converting words to indices')
     # find out which labels are there in the data (more flexible to different datasets)
@@ -72,10 +76,12 @@ if __name__ == '__main__':
     train_data = utils.create_dataset(train_pairs, word_dict, label_dict)
     valid_data = utils.create_dataset(valid_pairs, word_dict, label_dict)
 
-    ioutils.write_extra_embeddings(embeddings, args.save)
     ioutils.write_params(args.save, lowercase=args.lower, language=args.lang)
     ioutils.write_label_dict(label_dict, args.save)
-    weights, bias = ioutils.load_weights(args.weights)
+    if not args.load:
+        ioutils.write_extra_embeddings(embeddings, args.save)
+    if args.weights:
+        weights, bias = ioutils.load_weights(args.weights)
 
     msg = '{} sentences have shape {} (firsts) and {} (seconds)'
     logger.debug(msg.format('Training',
@@ -89,13 +95,20 @@ if __name__ == '__main__':
     logger.info('Creating model')
     vocab_size = embeddings.shape[0]
     embedding_size = embeddings.shape[1]
-    model = MultiFeedForwardClassifier(args.num_units, 3, vocab_size,
-                                       embedding_size,
-                                       use_intra_attention=args.use_intra,
-                                       training=True, project_input=args.no_project)
-    model.initialize(sess, embeddings)
-    total_params = utils.count_parameters()
 
+    if args.load:
+        model = MultiFeedForwardClassifier.load(args.load, sess,
+                                                training=True)
+        model.initialize_embeddings(sess, embeddings)
+    else:
+        model = MultiFeedForwardClassifier(args.num_units, 3, vocab_size,
+                                           embedding_size,
+                                           use_intra_attention=args.use_intra,
+                                           training=True,
+                                           project_input=args.no_project)
+        model.initialize(sess, embeddings)
+
+    total_params = utils.count_parameters()
     logger.debug('Total parameters: %d' % total_params)
 
     logger.info('Starting training')

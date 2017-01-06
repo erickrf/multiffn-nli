@@ -23,7 +23,7 @@ def clip_alignments(alignments, size1, size2):
     return clipped_alignments
 
 
-class AlignPretrainer(Trainable):
+class AlignmentWrapper(Trainable):
     """
     Class to wrap an instance of a decomposable neural classifier
     and pretrain its weights for the alignment subtask.
@@ -108,8 +108,8 @@ class AlignPretrainer(Trainable):
     def train(self, session, train_dataset, valid_dataset, save_dir,
               learning_rate, num_epochs, batch_size, dropout_keep, l2,
               clip_norm, report_interval=100):
-        super(AlignPretrainer, self)._train(session, get_weights_and_biases(),
-                                            save_dir, train_dataset, valid_dataset,
-                                            learning_rate, num_epochs, batch_size,
-                                            dropout_keep, l2, clip_norm, report_interval)
+        super(AlignmentWrapper, self)._train(session, get_weights_and_biases(),
+                                             save_dir, train_dataset, valid_dataset,
+                                             learning_rate, num_epochs, batch_size,
+                                             dropout_keep, l2, clip_norm, report_interval)
 

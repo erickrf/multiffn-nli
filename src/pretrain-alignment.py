@@ -45,13 +45,15 @@ if __name__ == '__main__':
     parser.add_argument('-v', help='Verbose', action='store_true', dest='verbose')
     parser.add_argument('--report', help='Number of batches between performance reports',
                         default=100, type=int)
+    parser.add_argument('--lang', choices=['en', 'pt'], default='en',
+                        help='Language (default en; only affects tokenizer)')
 
     args = parser.parse_args()
 
     utils.config_logger(args.verbose)
     word_dict, embeddings = ioutils.load_embeddings(args.embeddings, args.vocabulary)
     ioutils.write_extra_embeddings(embeddings, args.save)
-    ioutils.write_params(args.save, lowercase=args.lower)
+    ioutils.write_params(args.save, lowercase=args.lower, language=args.lang)
     train_dataset = utils.create_alignment_dataset(args.train, args.lower, word_dict)
     valid_dataset = utils.create_alignment_dataset(args.valid, args.lower, word_dict)
 

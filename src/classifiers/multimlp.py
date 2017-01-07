@@ -493,6 +493,13 @@ class MultiFeedForwardClassifier(Trainable):
         saver = tf.train.Saver(get_weights_and_biases())
         saver.restore(session, tensorflow_file)
 
+        # if training, optimizer values still have to be initialized
+        if training:
+            train_vars = [v for v in tf.global_variables()
+                          if v.name.startswith('training')]
+            init_op = tf.variables_initializer(train_vars)
+            session.run(init_op)
+
         return model
 
     def _get_params_to_save(self):

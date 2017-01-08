@@ -103,8 +103,8 @@ if __name__ == '__main__':
     model = multimlp.MultiFeedForwardClassifier.load(args.load, sess)
     word_dict, embeddings = ioutils.load_embeddings(args.embeddings, args.vocab,
                                                     generate=False,
-                                                    load_extra_from=args.load)
-    embeddings = utils.normalize_embeddings(embeddings)
+                                                    load_extra_from=args.load,
+                                                    normalize=True)
     model.initialize_embeddings(sess, embeddings)
 
     ops = []

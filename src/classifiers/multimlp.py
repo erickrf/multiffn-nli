@@ -160,6 +160,13 @@ class MultiFeedForwardClassifier(Trainable):
         self.logits = self.aggregate(self.v1, self.v2)
         self.answer = tf.argmax(self.logits, 1, 'answer')
 
+        hits = tf.equal(tf.cast(self.answer, tf.int32), self.label)
+        self.accuracy = tf.reduce_mean(tf.cast(hits, tf.float32),
+                                       name='accuracy')
+        cross_entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(self.logits,
+                                                                       self.label)
+        self.labeled_loss = tf.reduce_mean(cross_entropy)
+
         if training:
             self._create_training_tensors()
             self.merged_summaries = tf.merge_all_summaries()
@@ -436,17 +443,11 @@ class MultiFeedForwardClassifier(Trainable):
         """
         Create the tensors used for training
         """
-        hits = tf.equal(tf.cast(self.answer, tf.int32), self.label)
-        self.accuracy = tf.reduce_mean(tf.cast(hits, tf.float32),
-                                       name='accuracy')
         with tf.name_scope('training'):
-            cross_entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(self.logits,
-                                                                           self.label)
-            labeled_loss = tf.reduce_mean(cross_entropy)
             weights = [v for v in tf.global_variables() if 'weight' in v.name]
             l2_partial_sum = sum([tf.nn.l2_loss(weight) for weight in weights])
             l2_loss = tf.mul(self.l2_constant, l2_partial_sum, 'l2_loss')
-            self.loss = tf.add(labeled_loss, l2_loss, 'loss')
+            self.loss = tf.add(self.labeled_loss, l2_loss, 'loss')
 
             optimizer = tf.train.AdagradOptimizer(self.learning_rate)
             gradients, v = zip(*optimizer.compute_gradients(self.loss))
@@ -546,6 +547,23 @@ class MultiFeedForwardClassifier(Trainable):
         msg = 'Validation loss: %f\tValidation accuracy: %f' % (loss, acc)
         return loss, msg
 
+    def evaluate(self, session, dataset):
+        """
+        Run the model on the given dataset
+        :param session: tensorflow session
+        :param dataset: the dataset object
+        :type dataset: utils.RTEDataset
+        :return: a tuple (loss, accuracy)
+        """
+        assert isinstance(dataset, utils.RTEDataset)
+        feeds = self._create_batch_feed(dataset.sentences1,
+                                        dataset.sentences2,
+                                        dataset.sizes1,
+                                        dataset.sizes2,
+                                        dataset.labels,
+                                        0, 1, 0, 0)
+        return session.run([self.labeled_loss, self.accuracy], feeds)
+
     def train(self, session, train_dataset, valid_dataset, save_dir,
               learning_rate, num_epochs, batch_size, dropout_keep=1, l2=0,
               report_interval=100):
@@ -569,72 +587,3 @@ class MultiFeedForwardClassifier(Trainable):
         train(session, get_weights_and_biases(), save_dir, train_dataset,
               valid_dataset, learning_rate, num_epochs, batch_size,
               dropout_keep, l2, report_interval)
-
-        # logger = utils.get_logger('rte_network')
-        #
-        # # this tracks the accumulated loss in a minibatch (to take the average later)
-        # accumulated_loss = 0
-        #
-        # best_acc = 0
-        #
-        # # batch counter doesn't reset after each epoch
-        # batch_counter = 0
-        #
-        # # get all weights and biases, but not the embeddings
-        # # (embeddings are huge and saved separately)
-        # vars_to_save = get_weights_and_biases()
-        #
-        # saver = tf.train.Saver(vars_to_save, max_to_keep=1)
-        # # summ_writer = tf.train.SummaryWriter(log_dir, session.graph)
-        # # summ_writer.add_graph(session.graph)
-        #
-        # for i in range(num_epochs):
-        #     train_dataset.shuffle_data()
-        #     batch_index = 0
-        #
-        #     while batch_index < train_dataset.num_items:
-        #         batch_index2 = batch_index + batch_size
-        #
-        #         feeds = {self.sentence1: train_dataset.sentences1[batch_index:batch_index2],
-        #                  self.sentence2: train_dataset.sentences2[batch_index:batch_index2],
-        #                  self.sentence1_size: train_dataset.sizes1[batch_index:batch_index2],
-        #                  self.sentence2_size: train_dataset.sizes2[batch_index:batch_index2],
-        #                  self.label: train_dataset.labels[batch_index:batch_index2],
-        #                  self.dropout_keep: dropout_keep
-        #                  }
-        #
-        #         ops = [self.train_op, self.loss]
-        #         _, loss = session.run(ops, feed_dict=feeds)
-        #         accumulated_loss += loss
-        #
-        #         batch_index = batch_index2
-        #         batch_counter += 1
-        #         if batch_counter % report_interval == 0:
-        #             # summ_writer.add_summary(summaries, batch_counter)
-        #             avg_loss = accumulated_loss / report_interval
-        #             accumulated_loss = 0
-        #
-        #             feeds = {self.sentence1: valid_dataset.sentences1,
-        #                      self.sentence2: valid_dataset.sentences2,
-        #                      self.sentence1_size: valid_dataset.sizes1,
-        #                      self.sentence2_size: valid_dataset.sizes2,
-        #                      self.label: valid_dataset.labels,
-        #                      self.dropout_keep: 1.0
-        #                      }
-        #
-        #             valid_loss, acc = session.run([self.loss, self.accuracy],
-        #                                           feed_dict=feeds)
-        #
-        #             msg = '%d completed epochs, %d batches' % (i, batch_counter)
-        #             msg += '\tAverage training batch loss: %f' % avg_loss
-        #             msg += '\tValidation loss: %f' % valid_loss
-        #             msg += '\tV   alidation accuracy: %f' % acc
-        #             if acc > best_acc:
-        #                 best_acc = acc
-        #                 self.save(save_dir, session, saver)
-        #                 msg += '\t(saved model)'
-        #
-        #             logger.info(msg)
-
-        # summ_writer.flush()
-        # summ_writer.close()

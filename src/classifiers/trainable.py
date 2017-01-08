@@ -36,6 +36,13 @@ class Trainable(object):
         """
         pass
 
+    def evaluate(self, session, dataset):
+        """
+        Run the model on the given dataset
+        :param dataset: an RTEDataset object
+        """
+        pass
+
     def _train(self, session, vars_to_save, save_dir, train_dataset,
                valid_dataset, learning_rate, num_epochs, batch_size,
                dropout_keep=1, l2=0, clip_norm=-1, report_interval=1000):

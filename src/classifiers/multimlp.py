@@ -11,19 +11,19 @@ import utils
 from trainable import Trainable, get_weights_and_biases
 
 
-def variable_summaries(var, name):
+def variable_summaries(var):
     """
     Create tensorflow variable summaries
     """
-    with tf.name_scope("summaries"):
+    with tf.name_scope('summaries'):
         mean = tf.reduce_mean(var)
-        tf.scalar_summary('mean/' + name, mean)
+        tf.summary.scalar('mean', mean)
         with tf.name_scope('stddev'):
-            stddev = tf.sqrt(tf.reduce_sum(tf.square(var - mean)))
-        tf.scalar_summary('sttdev/' + name, stddev)
-        tf.scalar_summary('max/' + name, tf.reduce_max(var))
-        tf.scalar_summary('min/' + name, tf.reduce_min(var))
-        tf.histogram_summary(name, var)
+            stddev = tf.sqrt(tf.reduce_mean(tf.square(var - mean)))
+        tf.summary.scalar('sttdev', stddev)
+        tf.summary.scalar('max', tf.reduce_max(var))
+        tf.summary.scalar('min', tf.reduce_min(var))
+        tf.histogram_summary('histogram', var)
 
 
 def attention_softmax3d(values):
@@ -471,9 +471,18 @@ class MultiFeedForwardClassifier(Trainable):
         :param session: tensorflow session
         :param embeddings: the contents of the word embeddings
         """
-        logging.debug('Initializing embeddings')
         init_op = tf.global_variables_initializer()
         session.run(init_op, {self.embeddings_ph: embeddings})
+
+    @classmethod
+    def _init_from_load(cls, params, training):
+        """
+        Call the constructor inside the loader
+        :return: an instance of this class
+        """
+        return cls(params['num_units'], params['num_classes'],
+                   params['vocab_size'], params['embedding_size'],
+                   project_input=params['project_input'], training=training)
 
     @classmethod
     def load(cls, dirname, session, training=False):
@@ -485,10 +494,7 @@ class MultiFeedForwardClassifier(Trainable):
         :return: an instance of MultiFeedForward
         """
         params = utils.load_parameters(dirname)
-
-        model = cls(params['num_units'], params['num_classes'],
-                    params['vocab_size'],
-                    params['embedding_size'], training=training)
+        model = cls._init_from_load(params, training)
 
         tensorflow_file = os.path.join(dirname, 'model')
         saver = tf.train.Saver(get_weights_and_biases())
@@ -511,7 +517,8 @@ class MultiFeedForwardClassifier(Trainable):
         data = {'num_units': self.num_units,
                 'num_classes': self.num_classes,
                 'vocab_size': vocab_size,
-                'embedding_size': self.embedding_size}
+                'embedding_size': self.embedding_size,
+                'project_input': self.project_input}
 
         return data
 
@@ -566,7 +573,7 @@ class MultiFeedForwardClassifier(Trainable):
 
     def train(self, session, train_dataset, valid_dataset, save_dir,
               learning_rate, num_epochs, batch_size, dropout_keep=1, l2=0,
-              report_interval=100):
+              clip_norm=10, report_interval=100):
         """
         Train the model with the specified parameters
         :param session: tensorflow session
@@ -580,10 +587,11 @@ class MultiFeedForwardClassifier(Trainable):
         :param dropout_keep: dropout keep probability (applied at network
             input and output)
         :param l2: l2 loss constant
+        :param clip_norm: global tensor norm to clip
         :param report_interval: how many minibatches between each performance report
         :return:
         """
         train = super(MultiFeedForwardClassifier, self)._train
         train(session, get_weights_and_biases(), save_dir, train_dataset,
               valid_dataset, learning_rate, num_epochs, batch_size,
-              dropout_keep, l2, report_interval)
+              dropout_keep, l2, clip_norm, report_interval)

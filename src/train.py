@@ -21,9 +21,10 @@ if __name__ == '__main__':
     parser.add_argument('train', help='JSONL or TSV file with training corpus')
     parser.add_argument('validation', help='JSONL or TSV file with validation corpus')
     parser.add_argument('save', help='Directory to save the model files')
+    parser.add_argument('model', help='Type of architecture', choices=['lstm', 'mlp'])
 
     parser.add_argument('--load', help='Directory with previously trained '
-                                       'model (ignore -u)')
+                                       'model (only for MLP; ignore -u)')
     parser.add_argument('--vocab', help='Vocabulary file (only needed if numpy'
                                         'embedding file is given)')
     parser.add_argument('-e', dest='num_epochs', default=10, type=int,
@@ -35,16 +36,14 @@ if __name__ == '__main__':
     parser.add_argument('--no-proj', help='Do not project input embeddings to the '
                                           'same dimensionality used by internal networks',
                         action='store_false', dest='no_project')
-
     parser.add_argument('-d', dest='dropout', help='Dropout keep probability',
                         default=1.0, type=float)
     parser.add_argument('-c', dest='clip_norm', help='Norm to clip training gradients',
                         default=None, type=float)
     parser.add_argument('-r', help='Learning rate', type=float, default=0.001,
                         dest='rate')
-    parser.add_argument('-w', help='Numpy file with pretrained weights and biases '
+    parser.add_argument('-w', help='Numpy archive with pretrained weights and biases '
                                    'for the LSTM', dest='weights')
-
     parser.add_argument('--lang', choices=['en', 'pt'], default='en',
                         help='Language (default en; only affects tokenizer)')
     parser.add_argument('--lower', help='Lowercase the corpus (use it if the embedding '
@@ -96,17 +95,35 @@ if __name__ == '__main__':
     vocab_size = embeddings.shape[0]
     embedding_size = embeddings.shape[1]
 
-    if args.load:
-        model = MultiFeedForwardClassifier.load(args.load, sess,
-                                                training=True)
-        model.initialize_embeddings(sess, embeddings)
+    if args.model == 'mlp':
+        if args.load:
+            model = MultiFeedForwardClassifier.load(args.load, sess,
+                                                    training=True)
+            model.initialize_embeddings(sess, embeddings)
+        else:
+            model = MultiFeedForwardClassifier(args.num_units, 3, vocab_size,
+                                               embedding_size,
+                                               use_intra_attention=args.use_intra,
+                                               training=True,
+                                               project_input=args.no_project)
+            model.initialize(sess, embeddings)
     else:
-        model = MultiFeedForwardClassifier(args.num_units, 3, vocab_size,
-                                           embedding_size,
-                                           use_intra_attention=args.use_intra,
-                                           training=True,
-                                           project_input=args.no_project)
+        if args.weights:
+            import numpy as np
+            lstm_data = np.load(args.weights)
+            weights = lstm_data['weights']
+            bias = lstm_data['bias']
+        else:
+            weights = None
+            bias = None
+        model = LSTMClassifier(weights, bias, args.num_units, 3, vocab_size,
+                               embedding_size, training=True,
+                               project_input=args.no_project)
         model.initialize(sess, embeddings)
+
+    # LSTM is a subclass of the MFFW
+    # this assertion is just for type hinting for the IDE
+    assert isinstance(model, MultiFeedForwardClassifier)
 
     total_params = utils.count_parameters()
     logger.debug('Total parameters: %d' % total_params)
@@ -114,4 +131,4 @@ if __name__ == '__main__':
     logger.info('Starting training')
     model.train(sess, train_data, valid_data, args.save, args.rate,
                 args.num_epochs, args.batch_size, args.dropout, args.l2,
-                args.report)
+                args.clip_norm, args.report)

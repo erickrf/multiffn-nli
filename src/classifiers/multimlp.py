@@ -166,6 +166,11 @@ class MultiFeedForwardClassifier(Trainable):
         cross_entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(self.logits,
                                                                        self.label)
         self.labeled_loss = tf.reduce_mean(cross_entropy)
+        weights = [v for v in tf.trainable_variables()
+                   if 'weight' in v.name]
+        l2_partial_sum = sum([tf.nn.l2_loss(weight) for weight in weights])
+        l2_loss = tf.mul(self.l2_constant, l2_partial_sum, 'l2_loss')
+        self.loss = tf.add(self.labeled_loss, l2_loss, 'loss')
 
         if training:
             self._create_training_tensors()
@@ -442,11 +447,6 @@ class MultiFeedForwardClassifier(Trainable):
         Create the tensors used for training
         """
         with tf.name_scope('training'):
-            weights = [v for v in tf.global_variables() if 'weight' in v.name]
-            l2_partial_sum = sum([tf.nn.l2_loss(weight) for weight in weights])
-            l2_loss = tf.mul(self.l2_constant, l2_partial_sum, 'l2_loss')
-            self.loss = tf.add(self.labeled_loss, l2_loss, 'loss')
-
             optimizer = tf.train.AdagradOptimizer(self.learning_rate)
             gradients, v = zip(*optimizer.compute_gradients(self.loss))
             if self.clip_value is not None:

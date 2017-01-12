@@ -192,8 +192,6 @@ class MultiFeedForwardClassifier(Trainable):
             initializer = tf.random_normal_initializer(0.0, 0.1)
             weights = tf.get_variable('weights', [self.embedding_size, self.num_units],
                                       initializer=initializer)
-            if not reuse_weights:
-                variable_summaries(weights, 'projection/weights')
 
             projected = tf.matmul(embeddings_2d, weights)
 

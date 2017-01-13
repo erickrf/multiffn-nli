@@ -3,27 +3,11 @@
 from __future__ import print_function
 
 import json
-import logging
 import os
 import tensorflow as tf
 
 import utils
 from trainable import Trainable, get_weights_and_biases
-
-
-def variable_summaries(var):
-    """
-    Create tensorflow variable summaries
-    """
-    with tf.name_scope('summaries'):
-        mean = tf.reduce_mean(var)
-        tf.summary.scalar('mean', mean)
-        with tf.name_scope('stddev'):
-            stddev = tf.sqrt(tf.reduce_mean(tf.square(var - mean)))
-        tf.summary.scalar('sttdev', stddev)
-        tf.summary.scalar('max', tf.reduce_max(var))
-        tf.summary.scalar('min', tf.reduce_min(var))
-        tf.histogram_summary('histogram', var)
 
 
 def attention_softmax3d(values):
@@ -95,7 +79,8 @@ class MultiFeedForwardClassifier(Trainable):
     """
     def __init__(self, num_units, num_classes,
                  vocab_size, embedding_size, use_intra_attention=False,
-                 training=True, project_input=True, distance_biases=10):
+                 training=True, project_input=True, optimizer='adagrad',
+                 distance_biases=10):
 
         self.num_units = num_units
         self.num_classes = num_classes
@@ -123,7 +108,7 @@ class MultiFeedForwardClassifier(Trainable):
 
         # we initialize the embeddings from a placeholder to circumvent
         # tensorflow's limitation of 2 GB nodes in the graph
-        self.embeddings = tf.Variable(self.embeddings_ph, trainable=False,
+        self.embeddings = tf.Variable(self.embeddings_ph, trainable=True,
                                       validate_shape=True)
 
         # clip the sentences to the length of the longest one in the batch
@@ -173,7 +158,7 @@ class MultiFeedForwardClassifier(Trainable):
         self.loss = tf.add(self.labeled_loss, l2_loss, 'loss')
 
         if training:
-            self._create_training_tensors()
+            self._create_training_tensors(optimizer_algorithm=optimizer)
             self.merged_summaries = tf.merge_all_summaries()
 
     def _extra_init(self):
@@ -217,9 +202,10 @@ class MultiFeedForwardClassifier(Trainable):
         return tf.nn.relu(raw_values)
 
     def _apply_feedforward(self, inputs, num_input_units, scope,
-                           reuse_weights=False):
+                           reuse_weights=False, one_layer=False):
         """
         Apply two feed forward layers with self.num_units on the inputs.
+
         :param inputs: tensor in shape (batch, time_steps, num_input_units)
             or (batch, num_units)
         :param num_input_units: a python int
@@ -240,26 +226,29 @@ class MultiFeedForwardClassifier(Trainable):
 
             with tf.variable_scope('layer1'):
                 shape = [num_input_units, self.num_units]
-                weights1 = tf.get_variable('weights', shape, initializer=initializer)
+                weights1 = tf.get_variable('weights', shape,
+                                           initializer=initializer)
                 zero_init = tf.zeros_initializer([self.num_units])
                 bias1 = tf.get_variable('bias', dtype=tf.float32,
                                         initializer=zero_init)
 
-            with tf.variable_scope('layer2'):
-                shape = [self.num_units, self.num_units]
-                weights2 = tf.get_variable('weights', shape, initializer=initializer)
-                bias2 = tf.get_variable('bias', dtype=tf.float32,
-                                        initializer=zero_init)
-
             # relus are (time_steps * batch, num_units)
-            relus1 = self._relu_layer(inputs2d, weights1, bias1)
-            relus2 = self._relu_layer(relus1, weights2, bias2)
+            relus = self._relu_layer(inputs2d, weights1, bias1)
+
+            if not one_layer:
+                with tf.variable_scope('layer2'):
+                    shape = [self.num_units, self.num_units]
+                    weights2 = tf.get_variable('weights', shape,
+                                               initializer=initializer)
+                    bias2 = tf.get_variable('bias', dtype=tf.float32,
+                                            initializer=zero_init)
+                    relus = self._relu_layer(relus, weights2, bias2)
 
         if rank == 3:
             output_shape = tf.pack([-1, time_steps, self.num_units])
-            return tf.reshape(relus2, output_shape)
+            return tf.reshape(relus, output_shape)
 
-        return relus2
+        return relus
 
     def _get_distance_biases(self, time_steps, reuse_weights=False):
         """
@@ -402,7 +391,11 @@ class MultiFeedForwardClassifier(Trainable):
         # sum over time steps; resulting shape is (batch, num_units)
         v1_sum = tf.reduce_sum(v1, [1])
         v2_sum = tf.reduce_sum(v2, [1])
-        concat_v = tf.concat(1, [v1_sum, v2_sum])
+
+        # also take the max
+        v1_max = tf.reduce_max(v1, [1])
+        v2_max = tf.reduce_max(v2, [1])
+        concat_v = tf.concat(1, [v1_sum, v2_sum, v1_max, v2_max])
 
         with tf.variable_scope('aggregation') as self.aggregate_scope:
             initializer = tf.random_normal_initializer(0.0, 0.1)
@@ -415,7 +408,8 @@ class MultiFeedForwardClassifier(Trainable):
 
             num_units = self._num_units_on_aggregate()
             pre_logits = self._apply_feedforward(concat_v, num_units,
-                                                 self.aggregate_scope)
+                                                 self.aggregate_scope,
+                                                 one_layer=True)
             logits = tf.nn.xw_plus_b(pre_logits, weights_linear, bias_linear)
 
         return logits
@@ -425,7 +419,7 @@ class MultiFeedForwardClassifier(Trainable):
         Return the number of units used by the network when computing
         the aggregated representation of the two sentences.
         """
-        return 2 * self.num_units
+        return 4 * self.num_units
 
     def _transformation_compare(self, sentence, num_units, length,
                                 reuse_weights=False):
@@ -442,12 +436,20 @@ class MultiFeedForwardClassifier(Trainable):
         return self._apply_feedforward(sentence, num_units, self.compare_scope,
                                        reuse_weights)
 
-    def _create_training_tensors(self):
+    def _create_training_tensors(self, optimizer_algorithm):
         """
         Create the tensors used for training
         """
         with tf.name_scope('training'):
-            optimizer = tf.train.AdagradOptimizer(self.learning_rate)
+            if optimizer_algorithm == 'adagrad':
+                optimizer = tf.train.AdagradOptimizer(self.learning_rate)
+            elif optimizer_algorithm == 'adam':
+                optimizer = tf.train.AdamOptimizer(self.learning_rate)
+            elif optimizer_algorithm == 'adadelta':
+                optimizer = tf.train.AdadeltaOptimizer(self.learning_rate)
+            else:
+                ValueError('Unknown optimizer: %s' % optimizer_algorithm)
+
             gradients, v = zip(*optimizer.compute_gradients(self.loss))
             if self.clip_value is not None:
                 gradients, _ = tf.clip_by_global_norm(gradients, self.clip_value)

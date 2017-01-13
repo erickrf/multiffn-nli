@@ -53,6 +53,8 @@ if __name__ == '__main__':
     parser.add_argument('--l2', help='L2 normalization constant', type=float, default=0.0)
     parser.add_argument('--report', help='Number of batches between performance reports',
                         default=100, type=int)
+    parser.add_argument('--optim', help='Optimizer algorithm', default='adagrad',
+                        choices=['adagrad', 'adadelta', 'adam'])
     parser.add_argument('-v', help='Verbose', action='store_true', dest='verbose')
 
     args = parser.parse_args()
@@ -105,7 +107,8 @@ if __name__ == '__main__':
                                                embedding_size,
                                                use_intra_attention=args.use_intra,
                                                training=True,
-                                               project_input=args.no_project)
+                                               project_input=args.no_project,
+                                               optimizer=args.optim)
             model.initialize(sess, embeddings)
     else:
         if args.weights:
@@ -118,7 +121,8 @@ if __name__ == '__main__':
             bias = None
         model = LSTMClassifier(weights, bias, args.num_units, 3, vocab_size,
                                embedding_size, training=True,
-                               project_input=args.no_project)
+                               project_input=args.no_project,
+                               optimizer=args.optim)
         model.initialize(sess, embeddings)
 
     # LSTM is a subclass of the MFFW

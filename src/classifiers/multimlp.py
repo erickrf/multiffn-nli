@@ -554,13 +554,17 @@ class MultiFeedForwardClassifier(Trainable):
         msg = 'Validation loss: %f\tValidation accuracy: %f' % (loss, acc)
         return loss, msg
 
-    def evaluate(self, session, dataset):
+    def evaluate(self, session, dataset, return_answers):
         """
         Run the model on the given dataset
+
         :param session: tensorflow session
         :param dataset: the dataset object
         :type dataset: utils.RTEDataset
-        :return: a tuple (loss, accuracy)
+        :param return_answers: if True, also return the answers
+            the system gave
+        :return: if not return_answers, a tuple (loss, accuracy)
+            or else (loss, accuracy, answers)
         """
         assert isinstance(dataset, utils.RTEDataset)
         feeds = self._create_batch_feed(dataset.sentences1,
@@ -569,7 +573,11 @@ class MultiFeedForwardClassifier(Trainable):
                                         dataset.sizes2,
                                         dataset.labels,
                                         0, 1, 0, 0)
-        return session.run([self.labeled_loss, self.accuracy], feeds)
+        if return_answers:
+            ops = [self.loss, self.accuracy, self.answer]
+        else:
+            ops = [self.loss, self.accuracy]
+        return session.run(ops, feeds)
 
     def train(self, session, train_dataset, valid_dataset, save_dir,
               learning_rate, num_epochs, batch_size, dropout_keep=1, l2=0,

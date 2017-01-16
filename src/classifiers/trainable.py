@@ -36,7 +36,7 @@ class Trainable(object):
         """
         pass
 
-    def evaluate(self, session, dataset):
+    def evaluate(self, session, dataset, return_answers):
         """
         Run the model on the given dataset
         :param dataset: an RTEDataset object

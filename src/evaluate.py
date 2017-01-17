@@ -3,6 +3,7 @@
 from __future__ import division, print_function, unicode_literals
 
 import argparse
+from itertools import izip
 import tensorflow as tf
 
 import utils
@@ -13,6 +14,23 @@ import classifiers
 Evaluate the performance of an NLI model on a dataset
 """
 
+
+def print_errors(pairs, answers, label_dict):
+    """
+    Print the pairs for which the model gave a wrong answer,
+    their gold label and the system one.
+    """
+    for pair, answer in izip(pairs, answers):
+        label_str = pair[2]
+        label_number = label_dict[label_str]
+        if answer != label_number:
+            sent1 = ' '.join(pair[0])
+            sent2 = ' '.join(pair[1])
+            print('Sent 1: {}\nSent 2: {}'.format(sent1, sent2))
+            print('System label: {}, gold label: {}'.format(answer,
+                                                            label_number))
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('model', help='Directory with saved model')
@@ -20,6 +38,8 @@ if __name__ == '__main__':
     parser.add_argument('embeddings', help='Numpy embeddings file')
     parser.add_argument('vocabulary', help='Text file with embeddings vocabulary')
     parser.add_argument('-v', help='Verbose', action='store_true', dest='verbose')
+    parser.add_argument('-e', help='Print pairs and labels that got a wrong answer',
+                        action='store_true', dest='errors')
     args = parser.parse_args()
 
     utils.config_logger(verbose=args.verbose)
@@ -38,6 +58,10 @@ if __name__ == '__main__':
     pairs = ioutils.read_corpus(args.dataset, params['lowercase'],
                                 params['language'])
     dataset = utils.create_dataset(pairs, word_dict, label_dict)
-    loss, acc = model.evaluate(sess, dataset)
+    loss, acc, answers = model.evaluate(sess, dataset, True)
     print('Loss: %f' % loss)
     print('Accuracy: %f' % acc)
+
+    if args.errors:
+        print_errors(pairs, answers, label_dict)
+

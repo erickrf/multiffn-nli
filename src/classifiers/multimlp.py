@@ -3,7 +3,6 @@
 from __future__ import print_function
 
 import json
-import logging
 import os
 import tensorflow as tf
 
@@ -23,7 +22,7 @@ def variable_summaries(var):
         tf.summary.scalar('sttdev', stddev)
         tf.summary.scalar('max', tf.reduce_max(var))
         tf.summary.scalar('min', tf.reduce_min(var))
-        tf.histogram_summary('histogram', var)
+        tf.summary.histogram('histogram', var)
 
 
 def attention_softmax3d(values):
@@ -552,22 +551,30 @@ class MultiFeedForwardClassifier(Trainable):
         msg = 'Validation loss: %f\tValidation accuracy: %f' % (loss, acc)
         return loss, msg
 
-    def evaluate(self, session, dataset):
+    def evaluate(self, session, dataset, return_answers):
         """
         Run the model on the given dataset
         :param session: tensorflow session
         :param dataset: the dataset object
         :type dataset: utils.RTEDataset
-        :return: a tuple (loss, accuracy)
+        :param return_answers: if True, also return the answers
+        :return: if not return_answers, a tuple (loss, accuracy)
+            or else (loss, accuracy, answers)
         """
         assert isinstance(dataset, utils.RTEDataset)
+        if return_answers:
+            ops = [self.loss, self.accuracy, self.answer]
+        else:
+            ops = [self.loss, self.accuracy]
+
         feeds = self._create_batch_feed(dataset.sentences1,
                                         dataset.sentences2,
                                         dataset.sizes1,
                                         dataset.sizes2,
                                         dataset.labels,
                                         0, 1, 0, 0)
-        return session.run([self.labeled_loss, self.accuracy], feeds)
+
+        return session.run(ops, feeds)
 
     def train(self, session, train_dataset, valid_dataset, save_dir,
               learning_rate, num_epochs, batch_size, dropout_keep=1, l2=0,

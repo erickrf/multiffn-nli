@@ -9,6 +9,9 @@ Interactive evaluation for the RTE networks.
 import argparse
 import tensorflow as tf
 import numpy as np
+import matplotlib
+matplotlib.use('TKAgg')  # necessary on OS X
+from matplotlib import pyplot as pl
 
 from classifiers import multimlp
 import utils
@@ -79,13 +82,33 @@ def print_attention(tokens1, tokens2, attention):
         print (line)
 
 
+def plot_attention(tokens1, tokens2, attention):
+    """
+    Print a colormap showing attention values from tokens 1 to
+    tokens 2.
+    """
+    len1 = len(tokens1)
+    len2 = len(tokens2)
+    extent = [0, len2, 0, len1]
+    pl.matshow(attention, extent=extent, aspect='auto')
+    ticks1 = np.arange(len1) + 0.5
+    ticks2 = np.arange(len2) + 0.5
+    pl.xticks(ticks2, tokens2, rotation=45)
+    pl.yticks(ticks1, reversed(tokens1))
+    ax = pl.gca()
+    ax.xaxis.set_ticks_position('bottom')
+    pl.colorbar()
+    pl.title('Alignments')
+    pl.show(block=False)
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('load', help='Directory with saved model files')
     parser.add_argument('embeddings', help='Text or numpy file with word embeddings')
     parser.add_argument('--vocab', help='Vocabulary file (only needed if numpy'
                                         'embedding file is given)')
-    parser.add_argument('-a', help='Print attention values', dest='attention',
+    parser.add_argument('-a', help='Plot attention values graph', dest='attention',
                         action='store_true')
     parser.add_argument('-i', help='Run inference classifier', dest='inference',
                         action='store_true')
@@ -124,9 +147,8 @@ if __name__ == '__main__':
 
         vector1 = sent1.convert_sentence()
         vector2 = sent2.convert_sentence()
-        # +1 for NULL symbol
-        size1 = len(sent1) + 1
-        size2 = len(sent2) + 1
+        size1 = len(sent1.tokens_with_null)
+        size2 = len(sent2.tokens_with_null)
 
         feeds = {model.sentence1: vector1,
                  model.sentence2: vector2,
@@ -145,8 +167,12 @@ if __name__ == '__main__':
             print('Attention sentence 1:')
             print_attention(sent1.tokens_with_null,
                             sent2.tokens_with_null, att1[0])
+            plot_attention(sent1.tokens_with_null,
+                           sent2.tokens_with_null, att1[0])
             print('Attention sentence 2:')
             print_attention(sent2.tokens_with_null,
                             sent1.tokens_with_null, att2[0])
+            plot_attention(sent2.tokens_with_null,
+                           sent1.tokens_with_null, att2[0])
 
         print()

@@ -5,6 +5,7 @@ from __future__ import division, print_function, unicode_literals
 import argparse
 from collections import namedtuple
 import re
+import numpy as np
 
 """
 Extract the top accuracies or smallest losses from every training log file
@@ -15,7 +16,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('files', help='Log files',
                         nargs='+')
-    parser.add_argument('--metric', help='What metric to sort by',
+    parser.add_argument('--metric', help='Which metric to sort by',
                         choices=['accuracy', 'loss'], default='accuracy')
     args = parser.parse_args()
 
@@ -29,16 +30,22 @@ if __name__ == '__main__':
             text = f.read()
 
         accs = [float(val) for val in re.findall(regex_acc, text)]
-        max_acc = max(accs)
-        losses = [float(val) for val in re.findall(regex_acc, text)]
-        best_loss = min(losses)
-        performances[filename] = Performance(max_acc, best_loss)
+        losses = [float(val) for val in re.findall(regex_loss, text)]
+
+        if args.metric == 'accuracy':
+            accs = np.array(accs)
+            best_idx = accs.argmax()
+        else:
+            losses = np.array(losses)
+            best_idx = losses.argmin()
+            
+        performances[filename] = Performance(accs[best_idx], losses[best_idx])
 
     if args.metric == 'accuracy':
         sort_fn = lambda k: performances[k].acc
     else:
         sort_fn = lambda k: performances[k].loss
-
+            
     sorted_names = sorted(performances, key=sort_fn, reverse=True)
     for name in sorted_names:
         print(name, '\t', performances[name].acc, '\t', performances[name].loss)

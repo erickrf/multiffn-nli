@@ -138,18 +138,6 @@ def load_binary_embeddings(embeddings_path, vocabulary_path):
     return words, vectors
 
 
-def load_weights(path):
-    """
-    Load a npz numpy file with "weights" and "bias", returning both.
-    If it is None, return a tuple of two None objects.
-    """
-    if path is None:
-        return None, None
-
-    data = np.load(path)
-    return data['weights'], data['bias']
-
-
 def load_text_embeddings(path):
     """
     Load any embedding model written as text, in the format:

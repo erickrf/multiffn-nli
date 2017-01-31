@@ -15,8 +15,6 @@ import tensorflow as tf
 from collections import Counter
 from nltk.tokenize.regexp import RegexpTokenizer
 
-import ioutils
-
 tokenizer = nltk.tokenize.TreebankWordTokenizer()
 UNKNOWN = '**UNK**'
 PADDING = '**PAD**'
@@ -31,11 +29,12 @@ class RTEDataset(object):
 
     def __init__(self, sentences1, sentences2, sizes1, sizes2, labels):
         """
-        :param sentences1: A 2D numpy array with sentences (the first in each pair)
-            composed of token indices
+        :param sentences1: A 2D numpy array with sentences (the first in each
+            pair) composed of token indices
         :param sentences2: Same as above for the second sentence in each pair
-        :param sizes1: A 1D numpy array with the size of each sentence in the first group.
-            Sentences should be filled with the PADDING token after that point
+        :param sizes1: A 1D numpy array with the size of each sentence in the
+            first group. Sentences should be filled with the PADDING token after
+            that point
         :param sizes2: Same as above
         :param labels: 1D numpy array with labels as integers
         """
@@ -53,6 +52,26 @@ class RTEDataset(object):
         """
         shuffle_arrays([self.sentences1, self.sentences2,
                         self.sizes1, self.sizes2, self.labels])
+
+    def get_batch(self, from_, to):
+        """
+        Return an RTEDataset object with the subset of the data contained in
+        the given interval. Note that the actual number of items may be less
+        than (`to` - `from_`) if there are not enough of them.
+
+        :param from_: which position to start from
+        :param to: which position to end
+        :return: an RTEDataset object
+        """
+        if from_ == 0 and to >= self.num_items:
+            return self
+
+        subset = RTEDataset(self.sentences1[from_:to],
+                            self.sentences2[from_:to],
+                            self.sizes1[from_:to],
+                            self.sizes2[from_:to],
+                            self.labels[from_:to])
+        return subset
 
 
 def get_tokenizer(language):
@@ -81,8 +100,8 @@ def tokenize_english(text):
 
 def tokenize_portuguese(text):
     """
-    Tokenize the given sentence in Portuguese. The tokenization is done in conformity
-    with Universal Treebanks (at least it attempts so).
+    Tokenize the given sentence in Portuguese. The tokenization is done in
+    conformity  with Universal Treebanks (at least it attempts so).
 
     :param text: text to be tokenized, as a string
     """
@@ -210,87 +229,6 @@ def convert_labels(pairs, label_map):
     :return: a numpy array
     """
     return np.array([label_map[pair[2]] for pair in pairs], dtype=np.int32)
-
-
-def find_max_len(pairs, index):
-    """
-    Find the maximum length among tokenized sentences
-
-    :param pairs: list of tuples (sent1, sent2, label) with tokenized
-        sentences
-    :param index: whether to check the first sentence in each tuple
-        or the second (0 or 1)
-    :return: an integer
-    """
-    return max(len(pair[index]) for pair in pairs)
-
-
-def create_alignment_dataset(filename, lowercase, word_dict,
-                             max_len1=None, max_len2=None):
-    """
-    Generate and return a dataset with alignment data.
-    :param filename: path to corpus file
-    :param lowercase: whether to convert tokens to lowercase
-    :param word_dict: mapping of words to indices
-    :param max_len1: the maximum length that arrays for sentence 1
-        should have (i.e., time steps for an LSTM). If None, it
-        is computed from the data.
-    :param max_len2: same as max_len1 for sentence 2
-    :return: a RTEDataset object
-    """
-    logging.debug('Reading alignment data from %s' % filename)
-    pairs = ioutils.read_alignment(filename, lowercase)
-    alignments = [pair[2] for pair in pairs]
-    dataset = create_dataset(pairs, word_dict, max_len1=max_len1,
-                             max_len2=max_len2)
-    alignment_tensor = _create_alignment_matrices(dataset, alignments)
-    dataset.labels = alignment_tensor
-    return dataset
-
-
-def _create_alignment_matrices(dataset, alignments):
-    """
-    Create the matrices used as target for the alignment network
-    All paddings are aligned to the first token in the other sentence,
-    assumed to be NULL.
-
-    This function creates dense vectors, since as of now tensorflow
-    doesn't accept sparse matrices as placeholder feeds.
-
-    :type dataset: RTEDataset
-    :param dataset: a list of lists of tuples (token_num, token_num)
-    :return: a 3d numpy tensor (num_items, max_size1, max_size2)
-    """
-    # max_size 1 and 2 include the NULL token at the beginning
-    max_size1 = dataset.sentences1.shape[1]
-    max_size2 = dataset.sentences2.shape[1]
-    shape = (dataset.num_items, max_size1, max_size2)
-    alignment_tensor = np.zeros(shape, dtype=np.float32)
-
-    for i, alignment in enumerate(alignments):
-        if len(alignment) == 0:
-            continue
-
-        # each alignment has the format [(i1, j1), (i2, j2), ...]
-        # we unzip them to create array indices [(i1, i2, ...), (j1, j2, ...)]
-        # add 1 because the original alignments didn't have NULL
-        coords = np.array(alignment) + 1
-        indices = coords.T
-        alignment_tensor[i, indices[0], indices[1]] = 1
-
-    # make sure every row and column has at least one alignment
-    # (non-aligned words are aligned to NULL)
-    line_sum = alignment_tensor.sum(2)
-    alignment_tensor[line_sum == 0, 0] = 1
-
-    column_sum = alignment_tensor.sum(1)
-    inds = column_sum == 0
-    alignment_tensor[:, 0, :][inds] = 1
-
-    # NULL tokens in both sentence have to be aligned to each other
-    alignment_tensor[:, 0, 0] = 1
-
-    return alignment_tensor
 
 
 def create_dataset(pairs, word_dict, label_dict=None,

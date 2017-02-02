@@ -501,17 +501,27 @@ class DecomposableNLIModel(object):
         """
         Create a feed dictionary to be given to the tensorflow session.
         """
-        pass
+        feeds = {self.sentence1: batch_data.sentences1,
+                 self.sentence2: batch_data.sentences2,
+                 self.sentence1_size: batch_data.sizes1,
+                 self.sentence2_size: batch_data.sizes2,
+                 self.label: batch_data.labels,
+                 self.learning_rate: learning_rate,
+                 self.dropout_keep: dropout_keep,
+                 self.l2_constant: l2,
+                 self.clip_value: clip_value
+                 }
+        return feeds
 
     def _run_on_validation(self, session, feeds):
         """
         Run the model with validation data, providing any useful information.
 
         :return: a tuple (validation_loss, validation_msg)
-            validation_msg should include information to be displayed about
-            validation performance
         """
-        pass
+        loss, acc = session.run([self.loss, self.accuracy], feeds)
+        msg = 'Validation loss: %f\tValidation accuracy: %f' % (loss, acc)
+        return loss, msg
 
     def evaluate(self, session, dataset, return_answers):
         """
@@ -523,11 +533,24 @@ class DecomposableNLIModel(object):
         """
         pass
 
-    def _train(self, session, vars_to_save, save_dir, train_dataset,
-               valid_dataset, learning_rate, num_epochs, batch_size,
-               dropout_keep=1, l2=0, clip_norm=-1, report_interval=1000):
+    def train(self, session, train_dataset, valid_dataset, save_dir,
+              learning_rate, num_epochs, batch_size, dropout_keep=1, l2=0,
+              clip_norm=10, report_interval=1000):
         """
+        Train the model
+
+        :param session: tensorflow session
         :type train_dataset: utils.RTEDataset
+        :type valid_dataset: utils.RTEDataset
+        :param save_dir: path to a directory to save model files
+        :param learning_rate: the initial learning rate
+        :param num_epochs: how many epochs to train the model for
+        :param batch_size: size of each batch
+        :param dropout_keep: probability of keeping units during the dropout
+        :param l2: l2 loss coefficient
+        :param clip_norm: global norm to clip gradient tensors
+        :param report_interval: number of batches before each performance
+            report
         """
         logger = utils.get_logger(self.__class__.__name__)
 
@@ -540,7 +563,7 @@ class DecomposableNLIModel(object):
         # batch counter doesn't reset after each epoch
         batch_counter = 0
 
-        saver = tf.train.Saver(vars_to_save, max_to_keep=1)
+        saver = tf.train.Saver(get_weights_and_biases(), max_to_keep=1)
 
         for i in range(num_epochs):
             train_dataset.shuffle_data()

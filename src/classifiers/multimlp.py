@@ -164,28 +164,6 @@ class MultiFeedForwardClassifier(DecomposableNLIModel):
         return self._apply_feedforward(sentence, num_units, self.compare_scope,
                                        reuse_weights)
 
-    def _create_batch_feed(self, batch_data, learning_rate, dropout_keep,
-                           l2, clip_value):
-        """
-        :type batch_data: utils.RTEDataset
-        """
-        feeds = {self.sentence1: batch_data.sentences1,
-                 self.sentence2: batch_data.sentences2,
-                 self.sentence1_size: batch_data.sizes1,
-                 self.sentence2_size: batch_data.sizes2,
-                 self.label: batch_data.labels,
-                 self.learning_rate: learning_rate,
-                 self.dropout_keep: dropout_keep,
-                 self.l2_constant: l2,
-                 self.clip_value: clip_value
-                 }
-        return feeds
-
-    def _run_on_validation(self, session, feeds):
-        loss, acc = session.run([self.loss, self.accuracy], feeds)
-        msg = 'Validation loss: %f\tValidation accuracy: %f' % (loss, acc)
-        return loss, msg
-
     def evaluate(self, session, dataset, return_answers, batch_size=5000):
         """
         Run the model on the given dataset
@@ -234,28 +212,3 @@ class MultiFeedForwardClassifier(DecomposableNLIModel):
             ret.append(all_answers)
 
         return ret
-
-    def train(self, session, train_dataset, valid_dataset, save_dir,
-              learning_rate, num_epochs, batch_size, dropout_keep=1, l2=0,
-              clip_norm=10, report_interval=100):
-        """
-        Train the model with the specified parameters
-        :param session: tensorflow session
-        :param train_dataset: an RTEDataset object with training data
-        :param valid_dataset: an RTEDataset object with validation data
-        :param save_dir: path to directory to save the model
-        :param learning_rate: the learning rate
-        :param num_epochs: number of epochs to run the model. During each epoch,
-            all data points are seen exactly once
-        :param batch_size: how many items in each minibatch.
-        :param dropout_keep: dropout keep probability (applied at network
-            input and output)
-        :param l2: l2 loss constant
-        :param clip_norm: global tensor norm to clip
-        :param report_interval: how many minibatches between each performance report
-        :return:
-        """
-        train = super(MultiFeedForwardClassifier, self)._train
-        train(session, get_weights_and_biases(), save_dir, train_dataset,
-              valid_dataset, learning_rate, num_epochs, batch_size,
-              dropout_keep, l2, clip_norm, report_interval)

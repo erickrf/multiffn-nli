@@ -81,6 +81,7 @@ class MultiFeedForwardClassifier(DecomposableNLIModel):
         """
         Return a 2-d tensor with the values of the distance biases to be applied
         on the intra-attention matrix of size sentence_size
+
         :param time_steps: tensor scalar
         :return: 2-d tensor (time_steps, time_steps)
         """
@@ -122,8 +123,9 @@ class MultiFeedForwardClassifier(DecomposableNLIModel):
             raw_attentions = tf.batch_matmul(f_intra, f_intra_t)
 
             # bias has shape (time_steps, time_steps)
-            bias = self._get_distance_biases(time_steps,
-                                             reuse_weights=reuse_weights)
+            with tf.device('/cpu:0'):
+                bias = self._get_distance_biases(time_steps,
+                                                 reuse_weights=reuse_weights)
 
             # bias is broadcast along batches
             raw_attentions += bias

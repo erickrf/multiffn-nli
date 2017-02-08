@@ -4,7 +4,7 @@ from __future__ import print_function
 
 import tensorflow as tf
 
-from multimlp import MultiFeedForwardClassifier
+from decomposable import DecomposableNLIModel, mask_3d
 
 
 def _initialize_rnn(weights, bias):
@@ -22,7 +22,7 @@ def _initialize_rnn(weights, bias):
         _ = tf.get_variable('LSTMCell/B', initializer=tf.constant(bias))
 
 
-class LSTMClassifier(MultiFeedForwardClassifier):
+class LSTMClassifier(DecomposableNLIModel):
     """
     Improvements over the multi feed forward classifier. This is mostly
     based on "Enhancing and Combining Sequential and Tree LSTM for
@@ -36,8 +36,8 @@ class LSTMClassifier(MultiFeedForwardClassifier):
             module. It can be None.
         :param bias: LSTM biases to initialize the inter-attention
             module. It can be None
-        :param args:
-        :param kwars:
+        :param args: args passed to DecomposableNLIModel
+        :param kwars: kwargs passed to DecomposableNLIModel
         """
         if weights is not None and bias is not None:
             _initialize_rnn(weights, bias)
@@ -47,19 +47,32 @@ class LSTMClassifier(MultiFeedForwardClassifier):
 
         super(LSTMClassifier, self).__init__(*args, **kwars)
 
+    def _create_aggregate_input(self, v1, v2):
+        """
+        Create and return the input to the aggregate step.
+
+        :param v1: tensor with shape (batch, time_steps, num_units)
+        :param v2: tensor with shape (batch, time_steps, num_units)
+        :return: a tensor with shape (batch, num_aggregate_inputs)
+        """
+        # sum over time steps; resulting shape is (batch, num_units)
+        v1 = mask_3d(v1, self.sentence1_size, 0, 1)
+        v2 = mask_3d(v2, self.sentence2_size, 0, 1)
+        v1_sum = tf.reduce_sum(v1, [1])
+        v2_sum = tf.reduce_sum(v2, [1])
+        v1_max = tf.reduce_max(v1, [1])
+        v2_max = tf.reduce_max(v2, [1])
+        return tf.concat(1, [v1_sum, v2_sum, v1_max, v2_max])
+
     def _extra_init(self):
         """
         Extra initialization stuff inside the constructor
         """
-        if self.use_intra:
-            msg = 'LSTMClassifier is not compatible with intra attention'
-            raise ValueError(msg)
-
         initializer = tf.contrib.layers.xavier_initializer()
         self.lstm = tf.nn.rnn_cell.LSTMCell(self.num_units,
                                             initializer=initializer)
 
-    def _num_units_on_aggregate(self):
+    def _num_inputs_on_aggregate(self):
         """
         Return the number of units used by the network when computing
         the aggregated representation of the two sentences.
@@ -100,8 +113,6 @@ class LSTMClassifier(MultiFeedForwardClassifier):
         """
         Perform the sentence comparison using the RNN.
         """
-        # return super(LSTMClassifier, self)._transformation_compare(sentence, num_units,
-        #                                                            length, reuse_weights)
         return self._apply_lstm(sentence, length, self.compare_scope,
                                 reuse_weights)
 
@@ -112,10 +123,6 @@ class LSTMClassifier(MultiFeedForwardClassifier):
         """
         scope_name = scope or 'lstm'
         with tf.variable_scope(scope_name, reuse=reuse_weights) as lstm_scope:
-            # outputs, _ = tf.nn.dynamic_rnn(self.lstm, inputs,
-            #                                dtype=tf.float32,
-            #                                sequence_length=length,
-            #                                scope=lstm_scope)
             outputs, _ = tf.nn.bidirectional_dynamic_rnn(self.lstm, self.lstm,
                                                          inputs,
                                                          dtype=tf.float32,

@@ -180,12 +180,13 @@ def load_text_embeddings(path):
     return words, embeddings
 
 
-def write_params(dirname, lowercase, language=None):
+def write_params(dirname, lowercase, language=None, model='mlp'):
     """
     Write system parameters (not related to the networks) to a file.
     """
     path = os.path.join(dirname, 'system-params.json')
-    data = {'lowercase': lowercase}
+    data = {'lowercase': lowercase,
+            'model': model}
     if language:
         data['language'] = language
     with open(path, 'wb') as f:

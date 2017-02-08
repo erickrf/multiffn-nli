@@ -100,7 +100,8 @@ if __name__ == '__main__':
 
     logger.info('Reading model')
     sess = tf.InteractiveSession()
-    model = multimlp.MultiFeedForwardClassifier.load(args.load, sess)
+    model_class = utils.get_model_class(params)
+    model = model_class.load(args.load, sess)
     word_dict, embeddings = ioutils.load_embeddings(args.embeddings, args.vocab,
                                                     generate=False,
                                                     load_extra_from=args.load,

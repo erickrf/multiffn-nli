@@ -1,4 +1,3 @@
 from multimlp import MultiFeedForwardClassifier
 from lstm import LSTMClassifier
-from alignment_wrapper import AlignmentWrapper
-from trainable import Trainable, get_weights_and_biases
+from decomposable import DecomposableNLIModel

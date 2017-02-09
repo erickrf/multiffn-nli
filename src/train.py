@@ -42,7 +42,7 @@ if __name__ == '__main__':
                         default=1.0, type=float)
     parser.add_argument('-c', dest='clip_norm', help='Norm to clip training '
                                                      'gradients',
-                        default=None, type=float)
+                        default=100, type=float)
     parser.add_argument('-r', help='Learning rate', type=float, default=0.001,
                         dest='rate')
     parser.add_argument('--lang', choices=['en', 'pt'], default='en',

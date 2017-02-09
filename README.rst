@@ -1,15 +1,18 @@
-Multi Feed-Fordward Networks for Natural Language Inference
-===========================================================
+Decomposable Neural Network Models for Natural Language Inference
+=================================================================
 
-This code is a Tensorflow implementation of the model described in `A Decomposable Attention Model for Natural Language Inference`__
+This code is a Tensorflow implementation of the models described in
+`A Decomposable Attention Model for Natural Language Inference`__ and `Enhancing and Combining Sequential and Tree LSTM for Natural Language Inference <https://arxiv.org/abs/1609.06038>`_ (for the latter, only the sequential model is implemented).
 
 .. __: https://arxiv.org/abs/1606.01933
 
-It is composed of feedforward neural networks that model alignments between the two sentences and combine then. No recurrent architectures such as LSTM or GRU are used, but it achieved 86.8% accuracy on the Stanford SNLI dataset, one of the best values so far reported.
+This architecture is composed of three main steps:
 
-The repository also features a variant using LSTMs to transform the sentences, inspired by `Enhancing and Combining Sequential and Tree LSTM for Natural Language Inference`__, which has more parameters but achieves slightly superior results.
+1. **Align.** This steps finds word-level alignments between the two sentences. The words in one sentence are compared to the words in the other one, possibly considering their contexts. 
 
-.. __: https://arxiv.org/abs/1609.06038
+2. **Compare.** Each word is paired with a representation of the words it is aligned to. This representation is achieved by combining word embeddings, weighted by the strength of the alignment. Neural networks process these combinations.
+
+3. **Aggregate.** All word-alignemnt pairs are combined for a final decision with respect to the relation between the two sentences.
 
 Usage
 -----
@@ -49,5 +52,12 @@ In order to run a trained model interactively in the command line, use `interact
     Type sentence 2: The man is eating in a restaurant.
     Model answer: neutral
 
+It can also show a heatmap of the alignments.
+
+.. image:: alignments.png
 
 
+Evaluation
+^^^^^^^^^^
+
+Use the script `evaluate.py` to obtain a model's loss, accuracy and optionally see the misclassified pairs.

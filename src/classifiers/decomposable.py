@@ -2,6 +2,7 @@
 
 import abc
 import json
+import logging
 import os
 
 import tensorflow as tf
@@ -74,15 +75,6 @@ def mask_3d(values, sentence_sizes, mask_value, dimension=2):
         masked = tf.transpose(masked, [0, 2, 1])
 
     return masked
-
-
-def get_weights_and_biases():
-    """
-    Return all weight and bias variables
-    :return: a list with tensorflow variables
-    """
-    return [var for var in tf.trainable_variables()
-            if 'weight' in var.name or 'bias' in var.name]
 
 
 class DecomposableNLIModel(object):
@@ -318,6 +310,21 @@ class DecomposableNLIModel(object):
         raw_values = tf.nn.xw_plus_b(after_dropout, weights, bias)
         return tf.nn.relu(raw_values)
 
+    def _create_aggregate_input(self, v1, v2):
+        """
+        Create and return the input to the aggregate step.
+
+        :param v1: tensor with shape (batch, time_steps, num_units)
+        :param v2: tensor with shape (batch, time_steps, num_units)
+        :return: a tensor with shape (batch, num_aggregate_inputs)
+        """
+        # sum over time steps; resulting shape is (batch, num_units)
+        v1 = mask_3d(v1, self.sentence1_size, 0, 1)
+        v2 = mask_3d(v2, self.sentence2_size, 0, 1)
+        v1_sum = tf.reduce_sum(v1, [1])
+        v2_sum = tf.reduce_sum(v2, [1])
+        return tf.concat(1, [v1_sum, v2_sum])
+
     def attend(self, sent1, sent2):
         """
         Compute inter-sentence attention. This is step 1 (attend) in the paper
@@ -387,17 +394,12 @@ class DecomposableNLIModel(object):
         """
         Aggregate the representations induced from both sentences and their
         representations
+
         :param v1: tensor with shape (batch, time_steps, num_units)
         :param v2: tensor with shape (batch, time_steps, num_units)
         :return: logits over classes, shape (batch, num_classes)
         """
-        # sum over time steps; resulting shape is (batch, num_units)
-        v1 = mask_3d(v1, self.sentence1_size, 0, 1)
-        v2 = mask_3d(v2, self.sentence2_size, 0, 1)
-        v1_sum = tf.reduce_sum(v1, [1])
-        v2_sum = tf.reduce_sum(v2, [1])
-        concat_v = tf.concat(1, [v1_sum, v2_sum])
-
+        inputs = self._create_aggregate_input(v1, v2)
         with tf.variable_scope('aggregation') as self.aggregate_scope:
             initializer = tf.random_normal_initializer(0.0, 0.1)
             with tf.variable_scope('linear'):
@@ -408,7 +410,7 @@ class DecomposableNLIModel(object):
                                               initializer=tf.zeros_initializer)
 
             num_units = self._num_inputs_on_aggregate()
-            pre_logits = self._apply_feedforward(concat_v, num_units,
+            pre_logits = self._apply_feedforward(inputs, num_units,
                                                  self.aggregate_scope)
             logits = tf.nn.xw_plus_b(pre_logits, weights_linear, bias_linear)
 
@@ -458,7 +460,7 @@ class DecomposableNLIModel(object):
         model = cls._init_from_load(params, training)
 
         tensorflow_file = os.path.join(dirname, 'model')
-        saver = tf.train.Saver(get_weights_and_biases())
+        saver = tf.train.Saver(tf.trainable_variables())
         saver.restore(session, tensorflow_file)
 
         # if training, optimizer values still have to be initialized
@@ -523,16 +525,6 @@ class DecomposableNLIModel(object):
         msg = 'Validation loss: %f\tValidation accuracy: %f' % (loss, acc)
         return loss, msg
 
-    def evaluate(self, session, dataset, return_answers):
-        """
-        Run the model on the given dataset
-
-        :param session: tensorflow session
-        :param dataset: an RTEDataset object
-        :param return_answers: whether to return all the answers by the system
-        """
-        pass
-
     def train(self, session, train_dataset, valid_dataset, save_dir,
               learning_rate, num_epochs, batch_size, dropout_keep=1, l2=0,
               clip_norm=10, report_interval=1000):
@@ -563,7 +555,7 @@ class DecomposableNLIModel(object):
         # batch counter doesn't reset after each epoch
         batch_counter = 0
 
-        saver = tf.train.Saver(get_weights_and_biases(), max_to_keep=1)
+        saver = tf.train.Saver(tf.trainable_variables(), max_to_keep=1)
 
         for i in range(num_epochs):
             train_dataset.shuffle_data()
@@ -601,3 +593,52 @@ class DecomposableNLIModel(object):
                         msg += '\t(saved model)'
 
                     logger.info(msg)
+
+    def evaluate(self, session, dataset, return_answers, batch_size=5000):
+        """
+        Run the model on the given dataset
+
+        :param session: tensorflow session
+        :param dataset: the dataset object
+        :type dataset: utils.RTEDataset
+        :param return_answers: if True, also return the answers
+        :param batch_size: how many items to run at a time. Relevant if you're
+            evaluating the train set performance
+        :return: if not return_answers, a tuple (loss, accuracy)
+            or else (loss, accuracy, answers)
+        """
+        if return_answers:
+            ops = [self.loss, self.accuracy, self.answer]
+        else:
+            ops = [self.loss, self.accuracy]
+
+        i = 0
+        j = batch_size
+        # store accuracies and losses weighted by the number of items in the
+        # batch to take the correct average in the end
+        weighted_accuracies = []
+        weighted_losses = []
+        answers = []
+        while i <= dataset.num_items:
+            subset = dataset.get_batch(i, j)
+
+            last = i + subset.num_items
+            logging.debug('Evaluating items between %d and %d' % (i, last))
+            i = j
+            j += batch_size
+
+            feeds = self._create_batch_feed(subset, 0, 1, 0, 0)
+            results = session.run(ops, feeds)
+            weighted_losses.append(results[0] * subset.num_items)
+            weighted_accuracies.append(results[1] * subset.num_items)
+            if return_answers:
+                answers.append(results[2])
+
+        avg_accuracy = np.sum(weighted_accuracies) / dataset.num_items
+        avg_loss = np.sum(weighted_losses) / dataset.num_items
+        ret = [avg_loss, avg_accuracy]
+        if return_answers:
+            all_answers = np.concatenate(answers)
+            ret.append(all_answers)
+
+        return ret

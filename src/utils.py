@@ -15,6 +15,8 @@ import tensorflow as tf
 from collections import Counter
 from nltk.tokenize.regexp import RegexpTokenizer
 
+import classifiers
+
 tokenizer = nltk.tokenize.TreebankWordTokenizer()
 UNKNOWN = '**UNK**'
 PADDING = '**PAD**'
@@ -207,6 +209,22 @@ def shuffle_arrays(*arrays):
     for array in arrays:
         np.random.shuffle(array)
         np.random.set_state(rng_state)
+
+
+def get_model_class(params):
+    """
+    Return the class of the model object
+
+    :param params: saved parameter dictionary
+    :return: a subclass of classifiers.DecomposableNLIModel
+    """
+    if params.get('model') == 'lstm':
+        model_class = classifiers.LSTMClassifier
+    else:
+        model_class = classifiers.MultiFeedForwardClassifier
+
+    assert issubclass(model_class, classifiers.DecomposableNLIModel)
+    return model_class
 
 
 def create_label_dict(pairs):

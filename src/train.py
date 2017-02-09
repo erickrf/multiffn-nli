@@ -12,7 +12,8 @@ import tensorflow as tf
 
 import ioutils
 import utils
-from classifiers import LSTMClassifier, MultiFeedForwardClassifier
+from classifiers import LSTMClassifier, MultiFeedForwardClassifier,\
+    DecomposableNLIModel
 
 
 if __name__ == '__main__':
@@ -81,7 +82,8 @@ if __name__ == '__main__':
     train_data = utils.create_dataset(train_pairs, word_dict, label_dict)
     valid_data = utils.create_dataset(valid_pairs, word_dict, label_dict)
 
-    ioutils.write_params(args.save, lowercase=args.lower, language=args.lang)
+    ioutils.write_params(args.save, lowercase=args.lower, language=args.lang,
+                         model=args.model)
     ioutils.write_label_dict(label_dict, args.save)
     ioutils.write_extra_embeddings(embeddings, args.save)
 
@@ -108,9 +110,13 @@ if __name__ == '__main__':
     else:
         model = LSTMClassifier(args.num_units, 3, vocab_size,
                                embedding_size, training=True,
-                               project_input=args.no_project)
+                               project_input=args.no_project,
+                               optimizer=args.optim)
 
     model.initialize(sess, embeddings)
+
+    # this assertion is just for type hinting for the IDE
+    assert isinstance(model, DecomposableNLIModel)
 
     total_params = utils.count_parameters()
     logger.debug('Total parameters: %d' % total_params)

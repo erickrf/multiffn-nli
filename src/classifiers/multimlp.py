@@ -2,14 +2,9 @@
 
 from __future__ import print_function, division
 
-import logging
-
-import numpy as np
 import tensorflow as tf
 
-import utils
-from decomposable import DecomposableNLIModel, attention_softmax3d,\
-    get_weights_and_biases
+from decomposable import DecomposableNLIModel, attention_softmax3d
 
 
 class MultiFeedForwardClassifier(DecomposableNLIModel):
@@ -165,52 +160,3 @@ class MultiFeedForwardClassifier(DecomposableNLIModel):
         """
         return self._apply_feedforward(sentence, num_units, self.compare_scope,
                                        reuse_weights)
-
-    def evaluate(self, session, dataset, return_answers, batch_size=5000):
-        """
-        Run the model on the given dataset
-
-        :param session: tensorflow session
-        :param dataset: the dataset object
-        :type dataset: utils.RTEDataset
-        :param return_answers: if True, also return the answers
-        :param batch_size: how many items to run at a time. Relevant if you're
-            evaluating the train set performance
-        :return: if not return_answers, a tuple (loss, accuracy)
-            or else (loss, accuracy, answers)
-        """
-        if return_answers:
-            ops = [self.loss, self.accuracy, self.answer]
-        else:
-            ops = [self.loss, self.accuracy]
-
-        i = 0
-        j = batch_size
-        # store accuracies and losses weighted by the number of items in the
-        # batch to take the correct average in the end
-        weighted_accuracies = []
-        weighted_losses = []
-        answers = []
-        while i <= dataset.num_items:
-            subset = dataset.get_batch(i, j)
-
-            last = i + subset.num_items
-            logging.debug('Evaluating items between %d and %d' % (i, last))
-            i = j
-            j += batch_size
-
-            feeds = self._create_batch_feed(subset, 0, 1, 0, 0)
-            results = session.run(ops, feeds)
-            weighted_losses.append(results[0] * subset.num_items)
-            weighted_accuracies.append(results[1] * subset.num_items)
-            if return_answers:
-                answers.append(results[2])
-
-        avg_accuracy = np.sum(weighted_accuracies) / dataset.num_items
-        avg_loss = np.sum(weighted_losses) / dataset.num_items
-        ret = [avg_loss, avg_accuracy]
-        if return_answers:
-            all_answers = np.concatenate(answers)
-            ret.append(all_answers)
-
-        return ret

@@ -20,7 +20,7 @@ def attention_softmax3d(values):
     """
     original_shape = tf.shape(values)
     num_units = original_shape[2]
-    reshaped_values = tf.reshape(values, tf.pack([-1, num_units]))
+    reshaped_values = tf.reshape(values, tf.stack([-1, num_units]))
     softmaxes = tf.nn.softmax(reshaped_values)
     return tf.reshape(softmaxes, original_shape)
 
@@ -36,7 +36,7 @@ def clip_sentence(sentence, sizes):
     """
     max_batch_size = tf.reduce_max(sizes)
     clipped_sent = tf.slice(sentence, [0, 0],
-                            tf.pack([-1, max_batch_size]))
+                            tf.stack([-1, max_batch_size]))
     return clipped_sent
 
 
@@ -69,7 +69,7 @@ def mask_3d(values, sentence_sizes, mask_value, dimension=2):
     mask3d = tf.expand_dims(mask, 1)
     mask3d = tf.tile(mask3d, (1, time_steps1, 1))
 
-    masked = tf.select(mask3d, values, pad_values)
+    masked = tf.where(mask3d, values, pad_values)
 
     if dimension == 1:
         masked = tf.transpose(masked, [0, 2, 1])
@@ -146,13 +146,13 @@ class DecomposableNLIModel(object):
         self.accuracy = tf.reduce_mean(tf.cast(hits, tf.float32),
                                        name='accuracy')
         cross_entropy = tf.nn.\
-            sparse_softmax_cross_entropy_with_logits(self.logits,
-                                                     self.label)
+            sparse_softmax_cross_entropy_with_logits(logits=self.logits,
+                                                     labels=self.label)
         self.labeled_loss = tf.reduce_mean(cross_entropy)
         weights = [v for v in tf.trainable_variables()
                    if 'weight' in v.name]
         l2_partial_sum = sum([tf.nn.l2_loss(weight) for weight in weights])
-        l2_loss = tf.mul(self.l2_constant, l2_partial_sum, 'l2_loss')
+        l2_loss = tf.multiply(self.l2_constant, l2_partial_sum, 'l2_loss')
         self.loss = tf.add(self.labeled_loss, l2_loss, 'loss')
 
         if training:
@@ -221,7 +221,7 @@ class DecomposableNLIModel(object):
             projected = tf.matmul(embeddings_2d, weights)
 
         projected_3d = tf.reshape(projected,
-                                  tf.pack([-1, time_steps, self.num_units]))
+                                  tf.stack([-1, time_steps, self.num_units]))
         return projected_3d
 
     def _transformation_compare(self, sentence, num_units, length,
@@ -262,7 +262,7 @@ class DecomposableNLIModel(object):
             time_steps = tf.shape(inputs)[1]
 
             # combine batch and time steps in the first dimension
-            inputs2d = tf.reshape(inputs, tf.pack([-1, num_input_units]))
+            inputs2d = tf.reshape(inputs, tf.stack([-1, num_input_units]))
         else:
             inputs2d = inputs
 
@@ -274,16 +274,18 @@ class DecomposableNLIModel(object):
                 shape = [num_input_units, num_units[0]]
                 weights1 = tf.get_variable('weights', shape,
                                            initializer=initializer)
-                zero_init = tf.zeros_initializer([num_units[0]])
-                bias1 = tf.get_variable('bias', dtype=tf.float32,
+                zero_init = tf.zeros_initializer()
+                bias1 = tf.get_variable('bias', shape=num_units[0],
+                                        dtype=tf.float32,
                                         initializer=zero_init)
 
             with tf.variable_scope('layer2'):
                 shape = [num_units[0], num_units[1]]
                 weights2 = tf.get_variable('weights', shape,
                                            initializer=initializer)
-                zero_init = tf.zeros_initializer([num_units[1]])
-                bias2 = tf.get_variable('bias', dtype=tf.float32,
+                zero_init = tf.zeros_initializer()
+                bias2 = tf.get_variable('bias', shape=num_units[1],
+                                        dtype=tf.float32,
                                         initializer=zero_init)
 
             # relus are (time_steps * batch, num_units)
@@ -291,7 +293,7 @@ class DecomposableNLIModel(object):
             relus2 = self._relu_layer(relus1, weights2, bias2)
 
         if rank == 3:
-            output_shape = tf.pack([-1, time_steps, self.num_units])
+            output_shape = tf.stack([-1, time_steps, self.num_units])
             return tf.reshape(relus2, output_shape)
 
         return relus2
@@ -323,7 +325,7 @@ class DecomposableNLIModel(object):
         v2 = mask_3d(v2, self.sentence2_size, 0, 1)
         v1_sum = tf.reduce_sum(v1, [1])
         v2_sum = tf.reduce_sum(v2, [1])
-        return tf.concat(1, [v1_sum, v2_sum])
+        return tf.concat(axis=1, values=[v1_sum, v2_sum])
 
     def attend(self, sent1, sent2):
         """
@@ -348,7 +350,7 @@ class DecomposableNLIModel(object):
 
             # compute the unnormalized attention for all word pairs
             # raw_attentions has shape (batch, time_steps1, time_steps2)
-            self.raw_attentions = tf.batch_matmul(repr1, repr2)
+            self.raw_attentions = tf.matmul(repr1, repr2)
 
             # now get the attention softmaxes
             masked = mask_3d(self.raw_attentions, self.sentence2_size, -np.inf)
@@ -360,8 +362,8 @@ class DecomposableNLIModel(object):
 
             self.inter_att1 = att_sent1
             self.inter_att2 = att_sent2
-            alpha = tf.batch_matmul(att_sent2, sent1, name='alpha')
-            beta = tf.batch_matmul(att_sent1, sent2, name='beta')
+            alpha = tf.matmul(att_sent2, sent1, name='alpha')
+            beta = tf.matmul(att_sent1, sent2, name='beta')
 
         return alpha, beta
 
@@ -382,7 +384,7 @@ class DecomposableNLIModel(object):
             num_units = 2 * self.representation_size
 
             # sent_and_alignment has shape (batch, time_steps, num_units)
-            sent_and_alignment = tf.concat(2, [sentence, soft_alignment])
+            sent_and_alignment = tf.concat(axis=2, values=[sentence, soft_alignment])
 
             output = self._transformation_compare(sent_and_alignment, num_units,
                                                   sentence_length,
@@ -407,7 +409,7 @@ class DecomposableNLIModel(object):
                 weights_linear = tf.get_variable('weights', shape,
                                                  initializer=initializer)
                 bias_linear = tf.get_variable('bias', [self.num_classes],
-                                              initializer=tf.zeros_initializer)
+                                              initializer=tf.zeros_initializer())
 
             num_units = self._num_inputs_on_aggregate()
             pre_logits = self._apply_feedforward(inputs, num_units,

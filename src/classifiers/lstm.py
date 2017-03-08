@@ -38,7 +38,7 @@ class LSTMClassifier(DecomposableNLIModel):
         v2_sum = tf.reduce_sum(v2, [1])
         v1_max = tf.reduce_max(v1, [1])
         v2_max = tf.reduce_max(v2, [1])
-        return tf.concat(1, [v1_sum, v2_sum, v1_max, v2_max])
+        return tf.concat(axis=1, values=[v1_sum, v2_sum, v1_max, v2_max])
 
     def _extra_init(self):
         """
@@ -101,5 +101,5 @@ class LSTMClassifier(DecomposableNLIModel):
                                                          sequence_length=length,
                                                          scope=lstm_scope)
             output_fw, output_bw = outputs
-            concat_outputs = tf.concat(2, [output_fw, output_bw])
+            concat_outputs = tf.concat(axis=2, values=[output_fw, output_bw])
         return concat_outputs

@@ -14,6 +14,11 @@ This architecture is composed of three main steps:
 
 3. **Aggregate.** All word-alignemnt pairs are combined for a final decision with respect to the relation between the two sentences.
 
+Requirements
+------------
+
+The code was only tested in Python 2.7. The ``master`` branch uses Tensorflow 0.12, but the ``tensorflow1.0`` branch uses version 1.0 (that is the only difference between the two branches).
+
 Usage
 -----
 

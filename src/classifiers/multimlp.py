@@ -83,11 +83,12 @@ class MultiFeedForwardClassifier(DecomposableNLIModel):
         with tf.variable_scope('distance-bias', reuse=reuse_weights):
             # this is d_{i-j}
             distance_bias = tf.get_variable('dist_bias', [self.distance_biases],
-                                            initializer=tf.zeros_initializer)
+                                            initializer=tf.zeros_initializer())
 
             # messy tensor manipulation for indexing the biases
             r = tf.range(0, time_steps)
-            r_matrix = tf.tile(tf.reshape(r, [1, -1]), tf.pack([time_steps, 1]))
+            r_matrix = tf.tile(tf.reshape(r, [1, -1]),
+                               tf.stack([time_steps, 1]))
             raw_inds = r_matrix - tf.reshape(r, [-1, 1])
             clipped_inds = tf.clip_by_value(raw_inds, 0,
                                             self.distance_biases - 1)
@@ -115,7 +116,7 @@ class MultiFeedForwardClassifier(DecomposableNLIModel):
 
             # these are f_ij
             # raw_attentions is (batch, time_steps, time_steps)
-            raw_attentions = tf.batch_matmul(f_intra, f_intra_t)
+            raw_attentions = tf.matmul(f_intra, f_intra_t)
 
             # bias has shape (time_steps, time_steps)
             with tf.device('/cpu:0'):
@@ -125,9 +126,9 @@ class MultiFeedForwardClassifier(DecomposableNLIModel):
             # bias is broadcast along batches
             raw_attentions += bias
             attentions = attention_softmax3d(raw_attentions)
-            attended = tf.batch_matmul(attentions, sentence)
+            attended = tf.matmul(attentions, sentence)
 
-        return tf.concat(2, [sentence, attended])
+        return tf.concat(axis=2, values=[sentence, attended])
 
     def _transformation_attend(self, sentence, num_units, length,
                                reuse_weights=False):

@@ -40,21 +40,13 @@ class LSTMClassifier(DecomposableNLIModel):
         v2_max = tf.reduce_max(v2, [1])
         return tf.concat(axis=1, values=[v1_sum, v2_sum, v1_max, v2_max])
 
-    def _extra_init(self):
-        """
-        Extra initialization stuff inside the constructor
-        """
-        initializer = tf.contrib.layers.xavier_initializer()
-        self.lstm = tf.nn.rnn_cell.LSTMCell(self.num_units,
-                                            initializer=initializer)
-
     def _num_inputs_on_aggregate(self):
         """
         Return the number of units used by the network when computing
         the aggregated representation of the two sentences.
         """
         # 2 directions * 4 pools from the v1/v2 (v1/2 max, v1/2 mean)
-        return 8 * self.lstm.output_size
+        return 8 * self.num_units
 
     def _transformation_attend(self, sentence, num_units, length,
                                reuse_weights=False):
@@ -94,8 +86,11 @@ class LSTMClassifier(DecomposableNLIModel):
         weight reusing.
         """
         scope_name = scope or 'lstm'
+        initializer = tf.contrib.layers.xavier_initializer()
+        lstm = tf.nn.rnn_cell.LSTMCell(self.num_units, initializer=initializer)
+
         with tf.variable_scope(scope_name, reuse=reuse_weights) as lstm_scope:
-            outputs, _ = tf.nn.bidirectional_dynamic_rnn(self.lstm, self.lstm,
+            outputs, _ = tf.nn.bidirectional_dynamic_rnn(lstm, lstm,
                                                          inputs,
                                                          dtype=tf.float32,
                                                          sequence_length=length,

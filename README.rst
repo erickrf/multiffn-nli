@@ -17,7 +17,7 @@ This architecture is composed of three main steps:
 Requirements
 ------------
 
-The code was only tested in Python 2.7. The ``master`` branch uses Tensorflow 0.12, but the ``tensorflow1.0`` branch uses version 1.0 (that is the only difference between the two branches).
+The code was only tested in Python 2.7. The current version run on tensorflow 1.2.
 
 Usage
 -----

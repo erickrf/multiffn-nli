@@ -118,7 +118,6 @@ class DecomposableNLIModel(object):
         self.clip_value = tf.placeholder(tf.float32, [], 'clip_norm')
         self.dropout_keep = tf.placeholder(tf.float32, None, 'dropout')
         self.embedding_size = embedding_size
-        self._extra_init()
 
         # we initialize the embeddings from a placeholder to circumvent
         # tensorflow's limitation of 2 GB nodes in the graph
@@ -193,12 +192,6 @@ class DecomposableNLIModel(object):
                 gradients, _ = tf.clip_by_global_norm(gradients,
                                                       self.clip_value)
             self.train_op = optimizer.apply_gradients(zip(gradients, v))
-
-    def _extra_init(self):
-        """
-        Entry point for subclasses initialize more stuff
-        """
-        pass
 
     def project_embeddings(self, embeddings, reuse_weights=False):
         """

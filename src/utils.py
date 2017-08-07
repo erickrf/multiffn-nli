@@ -52,8 +52,8 @@ class RTEDataset(object):
         Shuffle all data using the same random sequence.
         :return:
         """
-        shuffle_arrays([self.sentences1, self.sentences2,
-                        self.sizes1, self.sizes2, self.labels])
+        shuffle_arrays(self.sentences1, self.sentences2,
+                       self.sizes1, self.sizes2, self.labels)
 
     def get_batch(self, from_, to):
         """

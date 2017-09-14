@@ -116,7 +116,7 @@ class DecomposableNLIModel(object):
                                             name='learning_rate')
         self.l2_constant = tf.placeholder(tf.float32, [], 'l2_constant')
         self.clip_value = tf.placeholder(tf.float32, [], 'clip_norm')
-        self.dropout_keep = tf.placeholder(tf.float32, None, 'dropout')
+        self.dropout_keep = tf.placeholder(tf.float32, [], 'dropout')
         self.embedding_size = embedding_size
 
         # we initialize the embeddings from a placeholder to circumvent

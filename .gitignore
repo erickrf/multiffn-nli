@@ -2,3 +2,5 @@
 .DS_Store
 .idea/
 saves/
+*.txt
+*.sh

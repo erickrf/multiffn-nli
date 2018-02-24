@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-from __future__ import division
+from __future__ import division, unicode_literals
 
 """
 Utility functions.
@@ -107,7 +107,7 @@ def tokenize_portuguese(text):
 
     :param text: text to be tokenized, as a string
     """
-    tokenizer_regexp = ur'''(?ux)
+    tokenizer_regexp = r'''(?ux)
     # the order of the patterns is important!!
     # more structured patterns come first
     [a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+|    # emails

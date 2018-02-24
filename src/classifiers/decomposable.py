@@ -61,8 +61,8 @@ def mask_3d(values, sentence_sizes, mask_value, dimension=2):
     time_steps1 = tf.shape(values)[1]
     time_steps2 = tf.shape(values)[2]
 
-    ones = tf.ones_like(values, dtype=tf.int32)
-    pad_values = mask_value * tf.cast(ones, tf.float32)
+    ones = tf.ones_like(values, dtype=tf.float32)
+    pad_values = mask_value * ones
     mask = tf.sequence_mask(sentence_sizes, time_steps2)
 
     # mask is (batch_size, sentence2_size). we have to tile it for 3d
@@ -225,21 +225,13 @@ class DecomposableNLIModel(object):
                                reuse_weights=False):
         raise NotImplementedError()
 
-    def _num_inputs_on_aggregate(self):
-        """
-        Return the number of units used by the network when computing
-        the aggregated representation of the two sentences.
-        """
-        return 2 * self.num_units
-
-    def _apply_feedforward(self, inputs, num_input_units, scope,
+    def _apply_feedforward(self, inputs, scope,
                            reuse_weights=False, initializer=None,
                            num_units=None):
         """
         Apply two feed forward layers with self.num_units on the inputs.
         :param inputs: tensor in shape (batch, time_steps, num_input_units)
             or (batch, num_units)
-        :param num_input_units: a python int
         :param reuse_weights: reuse the weights inside the same tensorflow
             variable scope
         :param initializer: tensorflow initializer; by default a normal
@@ -250,60 +242,20 @@ class DecomposableNLIModel(object):
         """
         if num_units is None:
             num_units = [self.num_units, self.num_units]
-        rank = len(inputs.get_shape())
-        if rank == 3:
-            time_steps = tf.shape(inputs)[1]
-
-            # combine batch and time steps in the first dimension
-            inputs2d = tf.reshape(inputs, tf.stack([-1, num_input_units]))
-        else:
-            inputs2d = inputs
-
-        initializer = initializer or tf.random_normal_initializer(0.0, 0.1)
 
         scope = scope or 'feedforward'
         with tf.variable_scope(scope, reuse=reuse_weights):
             with tf.variable_scope('layer1'):
-                shape = [num_input_units, num_units[0]]
-                weights1 = tf.get_variable('weights', shape,
-                                           initializer=initializer)
-                zero_init = tf.zeros_initializer()
-                bias1 = tf.get_variable('bias', shape=num_units[0],
-                                        dtype=tf.float32,
-                                        initializer=zero_init)
+                inputs = tf.nn.dropout(inputs, self.dropout_keep)
+                relus = tf.layers.dense(inputs, num_units[0], tf.nn.relu,
+                                        kernel_initializer=initializer)
 
             with tf.variable_scope('layer2'):
-                shape = [num_units[0], num_units[1]]
-                weights2 = tf.get_variable('weights', shape,
-                                           initializer=initializer)
-                zero_init = tf.zeros_initializer()
-                bias2 = tf.get_variable('bias', shape=num_units[1],
-                                        dtype=tf.float32,
-                                        initializer=zero_init)
-
-            # relus are (time_steps * batch, num_units)
-            relus1 = self._relu_layer(inputs2d, weights1, bias1)
-            relus2 = self._relu_layer(relus1, weights2, bias2)
-
-        if rank == 3:
-            output_shape = tf.stack([-1, time_steps, self.num_units])
-            return tf.reshape(relus2, output_shape)
+                inputs = tf.nn.dropout(relus, self.dropout_keep)
+                relus2 = tf.layers.dense(inputs, num_units[1], tf.nn.relu,
+                                         kernel_initializer=initializer)
 
         return relus2
-
-    def _relu_layer(self, inputs, weights, bias):
-        """
-        Apply dropout to the inputs, followed by the weights and bias,
-        and finally the relu activation
-
-        :param inputs: 2d tensor
-        :param weights: 2d tensor
-        :param bias: 1d tensor
-        :return: 2d tensor
-        """
-        after_dropout = tf.nn.dropout(inputs, self.dropout_keep)
-        raw_values = tf.nn.xw_plus_b(after_dropout, weights, bias)
-        return tf.nn.relu(raw_values)
 
     def _create_aggregate_input(self, v1, v2):
         """
@@ -316,9 +268,12 @@ class DecomposableNLIModel(object):
         # sum over time steps; resulting shape is (batch, num_units)
         v1 = mask_3d(v1, self.sentence1_size, 0, 1)
         v2 = mask_3d(v2, self.sentence2_size, 0, 1)
-        v1_sum = tf.reduce_sum(v1, [1])
-        v2_sum = tf.reduce_sum(v2, [1])
-        return tf.concat(axis=1, values=[v1_sum, v2_sum])
+        v1_sum = tf.reduce_sum(v1, 1)
+        v2_sum = tf.reduce_sum(v2, 1)
+        v1_max = tf.reduce_max(v1, 1)
+        v2_max = tf.reduce_max(v2, 1)
+
+        return tf.concat(axis=1, values=[v1_sum, v2_sum, v1_max, v2_max])
 
     def attend(self, sent1, sent2):
         """
@@ -377,11 +332,12 @@ class DecomposableNLIModel(object):
             num_units = 2 * self.representation_size
 
             # sent_and_alignment has shape (batch, time_steps, num_units)
-            sent_and_alignment = tf.concat(axis=2, values=[sentence, soft_alignment])
+            inputs = [sentence, soft_alignment, sentence - soft_alignment,
+                      sentence * soft_alignment]
+            sent_and_alignment = tf.concat(axis=2, values=inputs)
 
-            output = self._transformation_compare(sent_and_alignment, num_units,
-                                                  sentence_length,
-                                                  reuse_weights)
+            output = self._transformation_compare(
+                sent_and_alignment, num_units, sentence_length, reuse_weights)
 
         return output
 
@@ -404,8 +360,7 @@ class DecomposableNLIModel(object):
                 bias_linear = tf.get_variable('bias', [self.num_classes],
                                               initializer=tf.zeros_initializer())
 
-            num_units = self._num_inputs_on_aggregate()
-            pre_logits = self._apply_feedforward(inputs, num_units,
+            pre_logits = self._apply_feedforward(inputs,
                                                  self.aggregate_scope)
             logits = tf.nn.xw_plus_b(pre_logits, weights_linear, bias_linear)
 
@@ -449,7 +404,7 @@ class DecomposableNLIModel(object):
         :param session: tensorflow session
         :param training: whether to create training tensors
         :return: an instance of MultiFeedForward
-        :rtype: MultiFeedForwardClassifier
+        :rtype: DecomposableNLIModel
         """
         params = utils.load_parameters(dirname)
         model = cls._init_from_load(params, training)
@@ -514,11 +469,10 @@ class DecomposableNLIModel(object):
         """
         Run the model with validation data, providing any useful information.
 
-        :return: a tuple (validation_loss, validation_msg)
+        :return: a tuple (validation_loss, validation_acc)
         """
         loss, acc = session.run([self.loss, self.accuracy], feeds)
-        msg = 'Validation loss: %f\tValidation accuracy: %f' % (loss, acc)
-        return loss, msg
+        return loss, acc
 
     def train(self, session, train_dataset, valid_dataset, save_dir,
               learning_rate, num_epochs, batch_size, dropout_keep=1, l2=0,
@@ -544,8 +498,10 @@ class DecomposableNLIModel(object):
         # this tracks the accumulated loss in a minibatch
         # (to take the average later)
         accumulated_loss = 0
+        accumulated_accuracy = 0
+        accumulated_num_items = 0
 
-        best_loss = 10e10
+        best_acc = 0
 
         # batch counter doesn't reset after each epoch
         batch_counter = 0
@@ -562,28 +518,36 @@ class DecomposableNLIModel(object):
                 feeds = self._create_batch_feed(batch, learning_rate,
                                                 dropout_keep, l2, clip_norm)
 
-                ops = [self.train_op, self.loss]
-                _, loss = session.run(ops, feed_dict=feeds)
-                accumulated_loss += loss
+                ops = [self.train_op, self.loss, self.accuracy]
+                _, loss, accuracy = session.run(ops, feed_dict=feeds)
+                accumulated_loss += loss * batch.num_items
+                accumulated_accuracy += accuracy * batch.num_items
+                accumulated_num_items += batch.num_items
 
                 batch_index = batch_index2
                 batch_counter += 1
+
                 if batch_counter % report_interval == 0:
-                    avg_loss = accumulated_loss / report_interval
+                    avg_loss = accumulated_loss / accumulated_num_items
+                    avg_accuracy = accumulated_accuracy / accumulated_num_items
                     accumulated_loss = 0
+                    accumulated_accuracy = 0
+                    accumulated_num_items = 0
 
                     feeds = self._create_batch_feed(valid_dataset,
                                                     0, 1, l2, 0)
 
-                    valid_loss, valid_msg = self._run_on_validation(session,
+                    valid_loss, valid_acc = self._run_on_validation(session,
                                                                     feeds)
 
                     msg = '%d completed epochs, %d batches' % (i, batch_counter)
-                    msg += '\tAverage training batch loss: %f' % avg_loss
-                    msg += '\t' + valid_msg
+                    msg += '\tAvg train loss: %f' % avg_loss
+                    msg += '\tAvg train acc: %.4f' % avg_accuracy
+                    msg += '\tValidation loss: %f' % valid_loss
+                    msg += '\tValidation acc: %.4f' % valid_acc
 
-                    if valid_loss < best_loss:
-                        best_loss = valid_loss
+                    if valid_acc > best_acc:
+                        best_acc = valid_acc
                         self.save(save_dir, session, saver)
                         msg += '\t(saved model)'
 
@@ -614,7 +578,7 @@ class DecomposableNLIModel(object):
         weighted_accuracies = []
         weighted_losses = []
         answers = []
-        while i <= dataset.num_items:
+        while i < dataset.num_items:
             subset = dataset.get_batch(i, j)
 
             last = i + subset.num_items

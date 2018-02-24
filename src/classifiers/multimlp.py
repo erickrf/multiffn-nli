@@ -109,8 +109,7 @@ class MultiFeedForwardClassifier(DecomposableNLIModel):
             # this is F_intra in the paper
             # f_intra1 is (batch, time_steps, num_units) and
             # f_intra1_t is (batch, num_units, time_steps)
-            f_intra = self._apply_feedforward(sentence, self.num_units,
-                                              scope,
+            f_intra = self._apply_feedforward(sentence, scope,
                                               reuse_weights=reuse_weights)
             f_intra_t = tf.transpose(f_intra, [0, 2, 1])
 
@@ -143,7 +142,7 @@ class MultiFeedForwardClassifier(DecomposableNLIModel):
         :param reuse_weights: whether to reuse weights inside this scope
         :return: a tensor with shape (batch, time_steps, num_units)
         """
-        return self._apply_feedforward(sentence, num_units, self.attend_scope,
+        return self._apply_feedforward(sentence, self.attend_scope,
                                        reuse_weights)
 
     def _transformation_compare(self, sentence, num_units, length,
@@ -159,5 +158,5 @@ class MultiFeedForwardClassifier(DecomposableNLIModel):
         :param reuse_weights: whether to reuse weights inside this scope
         :return: a tensor with shape (batch, time_steps, num_units)
         """
-        return self._apply_feedforward(sentence, num_units, self.compare_scope,
+        return self._apply_feedforward(sentence, self.compare_scope,
                                        reuse_weights)

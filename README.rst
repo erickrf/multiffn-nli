@@ -17,7 +17,7 @@ This architecture is composed of three main steps:
 Requirements
 ------------
 
-The code was only tested in Python 2.7. The current version run on tensorflow 1.2.
+The code is written in Python 2.7; the main incompatibility with Python 3 currently is the module structure. It runs (at least) on tensorflow versions from 1.2 to 1.5.
 
 Usage
 -----
